@@ -1,11 +1,12 @@
 import React from 'react';
-import { LayoutDashboard, Users, TrendingUp, Settings, LogOut } from 'lucide-react';
+import { LayoutDashboard, Users, TrendingUp, ScatterChart, LogOut } from 'lucide-react';
 
 export default function Sidebar({ activeTab, setActiveTab }) {
     const menu = [
         { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
         { id: 'stats', label: 'Player Stats', icon: Users },
-        { id: 'recs', label: 'Recommendations', icon: TrendingUp },
+        { id: 'viz', label: 'Court Vision', icon: ScatterChart },
+    { id: 'recs', label: 'Recommendations', icon: TrendingUp },
     ];
 
     return (

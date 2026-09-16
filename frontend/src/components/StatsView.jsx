@@ -1,11 +1,47 @@
-import React, { useState, useEffect } from 'react';
-import { fetchFilters, fetchStats, fetchAggregatedStats } from '../services/api';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { fetchFilters, fetchStats } from '../services/api';
 import { Search, Filter, Download, List, TrendingUp, BarChart2 } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
-import ScatterPlot from './charts/ScatterPlot';
+import useDebouncedValue from '../hooks/useDebouncedValue';
+import { useOpenPlayer } from '../hooks/playerDetailContext';
+import InfoTip from './InfoTip';
+import ColumnPicker from './ColumnPicker';
+import GamesWindowSelect from './GamesWindowSelect';
+import {
+    COLUMNS, COLUMN_CATEGORIES, DEFAULT_COLUMN_IDS,
+    columnKey, columnLabel, columnInfo, formatCell,
+    loadStoredColumns, storeColumns,
+} from '../columns';
 
+const SortIcon = ({ column, sortConfig }) => {
+    if (sortConfig.key !== column) return <div className="w-4 h-4 inline-block ml-1 opacity-20">↕</div>;
+    return (
+        <div className="w-4 h-4 inline-block ml-1 text-purple-400">
+            {sortConfig.direction === 'asc' ? '↑' : '↓'}
+        </div>
+    );
+};
+
+// Header helper to handle click and mapping to correct data key
+const Th = ({ label, sortKey, align = 'left', sortConfig, onSort, info }) => (
+    <th
+        className={`px-4 py-4 cursor-pointer hover:bg-[#ffffff05] transition-colors text-${align} whitespace-nowrap`}
+        onClick={() => onSort(sortKey)}
+    >
+        <div className={`flex items-center gap-1.5 ${align === 'right' ? 'justify-end' : align === 'center' ? 'justify-center' : ''}`}>
+            {label}
+            {info && <InfoTip text={info} />}
+            <SortIcon column={sortKey} sortConfig={sortConfig} />
+        </div>
+    </th>
+);
+
+// One definition per column drives both the header and the body cell. They used to
+// be two hand-maintained blocks that had to be edited in lockstep, which is how a
+// column ends up labelled as its neighbour.
+//   aggKey  - field name when showing averages; key - field name in raw mode
+//   fmt     - 'num' rounds to 1dp, 'pct' appends %, 'sign' shows +/-, 'text' as-is
+//   group   - 'core' is always visible, 'advanced' hides behind the toggle
 export default function StatsView() {
-    const [viewMode, setViewMode] = useState('table'); // 'table', 'consistency', 'efficiency'
     const [filters, setFilters] = useState({
         season: '2025',
         min_cr: 0,
@@ -22,15 +58,36 @@ export default function StatsView() {
         max_cr_limit: 35
     });
 
+    // Which metric the backend's Score column holds for the selected season
+    // (fantasy points for API-sourced seasons, PIR for the archives).
+    const [scoreMetric, setScoreMetric] = useState('PIR');
+
+    const [selectedColumns, setSelectedColumns] = useState(loadStoredColumns);
+    // The modal is shared app-wide now, so this view only needs the opener.
+    const openPlayer = useOpenPlayer();
+
+    const [filtersReady, setFiltersReady] = useState(false);
+
     const [players, setPlayers] = useState([]);
-    const [chartData, setChartData] = useState([]);
     const [loading, setLoading] = useState(false);
 
-    // Sorting State
-    const [sortConfig, setSortConfig] = useState({ key: 'PIR', direction: 'desc' });
+    // Sorting State. Null key means "use the order the server sent", which is
+    // already sorted by score - the previous default named a raw-mode key that does
+    // not exist on aggregated rows, so every comparison hit the null branch and the
+    // comparator became inconsistent.
+    const [sortConfig, setSortConfig] = useState({ key: null, direction: 'desc' });
+
+    // Sliders fire per drag step, so fetches follow the settled values while the
+    // controls themselves stay live.
+    const minCr = useDebouncedValue(filters.min_cr);
+    const maxCr = useDebouncedValue(filters.max_cr);
+
+    // Guards against an earlier, slower response overwriting a newer one.
+    const requestSeq = useRef(0);
 
     // Load initial filters options
     useEffect(() => {
+        setFiltersReady(false);
         loadFilters(filters.season);
     }, [filters.season]);
 
@@ -42,43 +99,56 @@ export default function StatsView() {
                 min_cr_limit: data.min_cr || 0,
                 max_cr_limit: data.max_cr || 35
             });
-            setFilters(prev => ({
-                ...prev,
-                min_cr: data.min_cr || 0,
-                max_cr: data.max_cr || 35,
-                position: 'All'
-            }));
+            setScoreMetric(data.score_metric || 'PIR');
+            // Only touch filters when a value actually changed. Returning a new
+            // object unconditionally changed its identity, which refired the fetch
+            // effect below and threw away the response already in flight.
+            setFilters(prev => {
+                const next = {
+                    ...prev,
+                    min_cr: data.min_cr || 0,
+                    max_cr: data.max_cr || 35,
+                    position: 'All'
+                };
+                const unchanged = prev.min_cr === next.min_cr
+                    && prev.max_cr === next.max_cr
+                    && prev.position === next.position;
+                return unchanged ? prev : next;
+            });
         }
+        setFiltersReady(true);
     };
+
+    // Depend on primitives, not the filters object: identity churn alone must not
+    // trigger a refetch.
+    // Nothing fetches until /api/filters has supplied the real CR bounds. Without
+    // this the first render fired a request with placeholder bounds whose response
+    // was immediately superseded - a wasted round trip on every mount.
+    // Also wait for the debounced values to catch up with the live ones. Mid-drag
+    // they differ, so this is what collapses a drag into a single request - and it
+    // stops the mount firing once with placeholder bounds and again once the real
+    // ones settle.
+    const settled = minCr === filters.min_cr && maxCr === filters.max_cr;
 
     useEffect(() => {
-        if (viewMode === 'table') {
-            loadTableStats();
-        } else {
-            loadChartStats();
-        }
-    }, [filters, viewMode, aggregation]);
+        if (!filtersReady || !settled) return;
+        loadTableStats();
+    }, [filtersReady, settled, filters.season, filters.position, minCr, maxCr, aggregation]);
 
     const loadTableStats = async () => {
+        const seq = ++requestSeq.current;
         setLoading(true);
-        // Pass last_x_games if aggregation > 0
-        const params = { ...filters };
-        if (aggregation > 0) {
-            params.last_x_games = aggregation;
-        } else {
-            params.last_x_games = 0;
-        }
+        const params = {
+            season: filters.season,
+            position: filters.position,
+            min_cr: minCr,
+            max_cr: maxCr,
+            last_x_games: aggregation
+        };
 
         const data = await fetchStats(params);
+        if (seq !== requestSeq.current) return; // a newer request has taken over
         setPlayers(data || []);
-        setLoading(false);
-    };
-
-    const loadChartStats = async () => {
-        setLoading(true);
-        // Charts always use aggregation, usually large window
-        const data = await fetchAggregatedStats({ ...filters, last_x_games: 100 });
-        setChartData(data || []);
         setLoading(false);
     };
 
@@ -94,7 +164,18 @@ export default function StatsView() {
         setSortConfig({ key, direction });
     };
 
-    const getSortedPlayers = () => {
+    // A one-game window is not an average of anything, so drop the prefix rather
+    // than label a single score "Avg".
+    const headerFor = (col) => {
+        const label = columnLabel(col, true, scoreMetric);
+        return aggregation === 1 && typeof label === 'string'
+            ? label.replace(/^Avg\s+/, '')
+            : label;
+    };
+
+    // Memoized: this used to re-copy and re-sort the whole list on every render,
+    // including renders caused only by the loading flag toggling.
+    const sortedPlayers = useMemo(() => {
         let sortableItems = [...players];
         if (sortConfig.key !== null) {
             sortableItems.sort((a, b) => {
@@ -106,9 +187,13 @@ export default function StatsView() {
                 if (typeof aValue === 'string' && !isNaN(aValue)) aValue = parseFloat(aValue);
                 if (typeof bValue === 'string' && !isNaN(bValue)) bValue = parseFloat(bValue);
 
-                // Handle nulls/undefined (push to bottom)
-                if (aValue === null || aValue === undefined) return 1;
-                if (bValue === null || bValue === undefined) return -1;
+                // Handle nulls/undefined (push to bottom). Both-missing must compare
+                // equal, or the comparator is inconsistent and the order scrambles.
+                const aMissing = aValue === null || aValue === undefined || aValue === '';
+                const bMissing = bValue === null || bValue === undefined || bValue === '';
+                if (aMissing && bMissing) return 0;
+                if (aMissing) return 1;
+                if (bMissing) return -1;
 
                 if (aValue < bValue) {
                     return sortConfig.direction === 'asc' ? -1 : 1;
@@ -120,42 +205,41 @@ export default function StatsView() {
             });
         }
         return sortableItems;
-    };
+    }, [players, sortConfig]);
 
-    const sortedPlayers = getSortedPlayers();
+    // Which columns this season can actually fill. 2024 never recorded assists or
+    // shooting splits, and the fantasy-sourced season has no minutes at all, so those
+    // are offered as disabled rather than rendered as a wall of dashes.
+    const availableColumns = useMemo(() => {
+        const ids = new Set();
+        for (const col of COLUMNS) {
+            if (col.cat === 'Essentials' || !players.length) { ids.add(col.id); continue; }
+            const key = columnKey(col, true);
+            if (players.some(p => p[key] !== null && p[key] !== undefined && p[key] !== '')) {
+                ids.add(col.id);
+            }
+        }
+        return ids;
+    }, [players, aggregation]);
 
-    const SortIcon = ({ column }) => {
-        if (sortConfig.key !== column) return <div className="w-4 h-4 inline-block ml-1 opacity-20">↕</div>;
-        return (
-            <div className="w-4 h-4 inline-block ml-1 text-purple-400">
-                {sortConfig.direction === 'asc' ? '↑' : '↓'}
-            </div>
-        );
-    };
-
-    // Header helper to handle click and mapping to correct data key
-    const Th = ({ label, sortKey, align = 'left' }) => (
-        <th
-            className={`px-6 py-4 cursor-pointer hover:bg-[#ffffff05] transition-colors text-${align}`}
-            onClick={() => requestSort(sortKey)}
-        >
-            <div className={`flex items-center gap-1 ${align === 'right' ? 'justify-end' : align === 'center' ? 'justify-center' : ''}`}>
-                {label} <SortIcon column={sortKey} />
-            </div>
-        </th>
+    const visibleColumns = useMemo(
+        () => COLUMNS.filter(col =>
+            (col.locked || selectedColumns.includes(col.id)) && availableColumns.has(col.id)
+        ),
+        [selectedColumns, availableColumns]
     );
 
-    const HeaderButton = ({ mode, icon: Icon, label }) => (
-        <button
-            onClick={() => setViewMode(mode)}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${viewMode === mode
-                ? 'bg-purple-600 text-white shadow-lg shadow-purple-900/20'
-                : 'text-gray-400 hover:text-white hover:bg-[#ffffff05]'
-                }`}
-        >
-            <Icon size={16} /> {label}
-        </button>
-    );
+    const chooseColumns = (ids) => {
+        // Keep the canonical column order regardless of the order they were ticked.
+        const ordered = COLUMNS.filter(c => ids.includes(c.id)).map(c => c.id);
+        setSelectedColumns(ordered);
+        storeColumns(ordered);
+    };
+
+    const resetColumns = () => {
+        setSelectedColumns(DEFAULT_COLUMN_IDS);
+        storeColumns(DEFAULT_COLUMN_IDS);
+    };
 
     return (
         <div className="space-y-6">
@@ -163,11 +247,6 @@ export default function StatsView() {
                 <div>
                     <h2 className="text-2xl font-bold">Player Statistics</h2>
                     <p className="text-gray-400 text-sm">Explore performance data and aggregated analytics.</p>
-                </div>
-                <div className="flex gap-2 bg-[#ffffff03] p-1 rounded-xl border border-[#ffffff05]">
-                    <HeaderButton mode="table" icon={List} label="Table" />
-                    <HeaderButton mode="consistency" icon={BarChart2} label="Consistency" />
-                    <HeaderButton mode="efficiency" icon={TrendingUp} label="Value" />
                 </div>
             </header>
 
@@ -180,28 +259,14 @@ export default function StatsView() {
                         onChange={handleSeasonChange}
                         className="input-dark bg-[#0a0a0c] min-w-[100px]"
                     >
-                        <option value="2025">2024-25</option>
-                        <option value="2024">2023-24</option>
-                        <option value="2023">2022-23</option>
+                        <option value="2026">2026-27</option>
+                        <option value="2025">2025-26</option>
+                        <option value="2024">2024-25</option>
+                        <option value="2023">2023-24</option>
                     </select>
                 </div>
 
-                {viewMode === 'table' && (
-                    <div className="flex flex-col gap-1">
-                        <label className="text-xs text-gray-500 uppercase tracking-wider font-semibold">View As</label>
-                        <select
-                            value={aggregation}
-                            onChange={(e) => setAggregation(parseInt(e.target.value))}
-                            className="input-dark bg-[#0a0a0c] min-w-[140px] text-purple-400 font-medium"
-                        >
-                            <option value="100">Season Average</option>
-                            <option value="3">Last 3 Games</option>
-                            <option value="5">Last 5 Games</option>
-                            <option value="10">Last 10 Games</option>
-                            <option value="0">All Games (Raw)</option>
-                        </select>
-                    </div>
-                )}
+                <GamesWindowSelect value={aggregation} onChange={setAggregation} />
 
                 <div className="flex flex-col gap-1">
                     <label className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Position</label>
@@ -215,6 +280,21 @@ export default function StatsView() {
                         ))}
                     </select>
                 </div>
+
+                {(
+                    <div className="flex flex-col gap-1">
+                        <label className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Columns</label>
+                        <ColumnPicker
+                            columns={COLUMNS}
+                            categories={COLUMN_CATEGORIES}
+                            selected={selectedColumns}
+                            available={availableColumns}
+                            onChange={chooseColumns}
+                            onReset={resetColumns}
+                            defaultIds={DEFAULT_COLUMN_IDS}
+                        />
+                    </div>
+                )}
 
                 <div className="flex flex-col gap-1 flex-1 min-w-[200px]">
                     <label className="text-xs text-gray-500 uppercase tracking-wider font-semibold">
@@ -233,107 +313,67 @@ export default function StatsView() {
                 </div>
             </div>
 
-            {loading && (
+            {loading && players.length === 0 && (
                 <div className="w-full h-[400px] flex items-center justify-center">
                     <div className="w-8 h-8 border-2 border-purple-500 border-t-transparent rounded-full animate-spin"></div>
                 </div>
             )}
 
-            {!loading && viewMode === 'table' && (
-                <div className="glass-panel overflow-hidden relative min-h-[400px]">
+            {(players.length > 0 || !loading) && (
+                <div className={`glass-panel overflow-hidden relative min-h-[400px] transition-opacity ${loading ? 'opacity-60' : ''}`}>
                     <div className="overflow-x-auto">
                         <table className="w-full text-left text-sm">
                             <thead className="bg-[#ffffff05] text-gray-400 font-medium uppercase text-xs">
                                 <tr>
-                                    <Th label="Player" sortKey="PlayerName" />
-                                    <Th label="Position" sortKey="position" />
-                                    <Th label="Team" sortKey="Team" />
-                                    <Th label="Cost (CR)" sortKey="CR" align="right" />
-
-                                    <Th
-                                        label={aggregation > 0 ? "Avg PIR" : "PIR"}
-                                        sortKey={aggregation > 0 ? "Average_PIR" : "PIR"}
-                                        align="right"
-                                    />
-                                    <Th
-                                        label={aggregation > 0 ? "Avg Pts" : "Points"}
-                                        sortKey={aggregation > 0 ? "Average_Points" : "Points"}
-                                        align="right"
-                                    />
-                                    <Th
-                                        label={aggregation > 0 ? "Avg Reb" : "Reb"}
-                                        sortKey={aggregation > 0 ? "Average_Rebounds" : "TotalRebounds"}
-                                        align="right"
-                                    />
-                                    <Th
-                                        label={aggregation > 0 ? "Avg Ast" : "Ast"}
-                                        sortKey={aggregation > 0 ? "Average_Assists" : "Assistances"}
-                                        align="right"
-                                    />
-
-                                    <Th
-                                        label={aggregation > 0 ? "Games" : "Round"}
-                                        sortKey={aggregation > 0 ? "GamesPlayed" : "GameCode"}
-                                        align="center"
-                                    />
+                                    {visibleColumns.map(col => (
+                                        <Th
+                                            key={col.id}
+                                            label={headerFor(col)}
+                                            sortKey={columnKey(col, true)}
+                                            align={col.align}
+                                            info={columnInfo(col, scoreMetric)}
+                                            sortConfig={sortConfig}
+                                            onSort={requestSort}
+                                        />
+                                    ))}
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-[#ffffff08]">
-                                <AnimatePresence>
                                     {sortedPlayers.map((player, idx) => (
-                                        <motion.tr
-                                            key={idx}
-                                            initial={{ opacity: 0, y: 10 }}
-                                            animate={{ opacity: 1, y: 0 }}
-                                            exit={{ opacity: 0 }}
-                                            transition={{ delay: idx * 0.005, duration: 0.2 }}
-                                            className="hover:bg-[#ffffff03] transition-colors"
+                                        <tr
+                                            key={`${player.PlayerID ?? player.PlayerName ?? 'row'}-${idx}`}
+                                            onClick={() => openPlayer(player.PlayerName, filters.season)}
+                                            className="hover:bg-[#ffffff03] transition-colors cursor-pointer"
                                         >
-                                            <td className="px-6 py-3 font-medium text-white">
-                                                {player.PlayerName}
-                                                {player.InjuryStatus && (
-                                                    <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/30">
-                                                        {player.InjuryStatus}
-                                                    </span>
-                                                )}
-                                            </td>
-                                            <td className="px-6 py-3 text-gray-300">{player.position}</td>
-                                            <td className="px-6 py-3 text-gray-300">{player.Team || '-'}</td>
-                                            <td className="px-6 py-3 text-right font-mono text-purple-300">{player.CR}</td>
-
-                                            <td className="px-6 py-3 text-right font-mono font-bold text-white">
-                                                {aggregation > 0
-                                                    ? (player.Average_PIR || player.PIR || '-')
-                                                    : (player.PIR || '-')}
-                                            </td>
-                                            <td className="px-6 py-3 text-right font-mono text-gray-400">
-                                                {aggregation > 0
-                                                    ? (player.Average_Points || player.Points || '-')
-                                                    : (player.Points || '-')}
-                                            </td>
-                                            <td className="px-6 py-3 text-right font-mono text-gray-400">
-                                                {aggregation > 0
-                                                    ? (player.Average_Rebounds || player.TotalRebounds || '-')
-                                                    : (player.TotalRebounds || '-')}
-                                            </td>
-                                            <td className="px-6 py-3 text-right font-mono text-gray-400">
-                                                {aggregation > 0
-                                                    ? (player.Average_Assists || player.Assistances || '-')
-                                                    : (player.Assistances || '-')}
-                                            </td>
-
-                                            <td className="px-6 py-3 text-center text-gray-400">
-                                                {aggregation > 0
-                                                    ? (player.GamesPlayed || '-')
-                                                    : (player.GameCode || '-')}
-                                            </td>
-                                        </motion.tr>
+                                            {visibleColumns.map(col => {
+                                                const value = player[columnKey(col, true)];
+                                                if (col.fmt === 'player') {
+                                                    return (
+                                                        <td key={col.id} className="px-4 py-3 font-medium text-white whitespace-nowrap">
+                                                            {player.PlayerName}
+                                                            {player.InjuryStatus && (
+                                                                <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/30">
+                                                                    {player.InjuryStatus}
+                                                                </span>
+                                                            )}
+                                                        </td>
+                                                    );
+                                                }
+                                                const alignClass = col.align === 'right' ? 'text-right' : col.align === 'center' ? 'text-center' : 'text-left';
+                                                const toneClass = col.strong ? 'font-bold text-white' : col.id === 'CR' ? 'text-purple-300' : 'text-gray-400';
+                                                const mono = col.fmt !== 'text' ? 'font-mono' : '';
+                                                return (
+                                                    <td key={col.id} className={`px-4 py-3 ${alignClass} ${mono} ${toneClass}`}>
+                                                        {formatCell(value, col.fmt)}
+                                                    </td>
+                                                );
+                                            })}
+                                        </tr>
                                     ))}
-                                </AnimatePresence>
 
                                 {sortedPlayers.length === 0 && (
                                     <tr>
-                                        <td colSpan={9} className="px-6 py-12 text-center text-gray-500">
+                                        <td colSpan={visibleColumns.length} className="px-4 py-12 text-center text-gray-500">
                                             No players found matching these filters.
                                         </td>
                                     </tr>
@@ -342,28 +382,6 @@ export default function StatsView() {
                         </table>
                     </div>
                 </div>
-            )}
-
-            {!loading && viewMode === 'consistency' && (
-                <ScatterPlot
-                    data={chartData}
-                    xKey="StdDev_PIR"
-                    yKey="Average_PIR"
-                    xLabel="Consistency Risk (Std Dev)"
-                    yLabel="Performance (Avg PIR)"
-                    title="Consistency Analysis: Higher Performance & Lower Risk"
-                />
-            )}
-
-            {!loading && viewMode === 'efficiency' && (
-                <ScatterPlot
-                    data={chartData}
-                    xKey="CR"
-                    yKey="Average_PIR"
-                    xLabel="Cost (CR)"
-                    yLabel="Performance (Avg PIR)"
-                    title="Value Analysis: Cost vs Performance"
-                />
             )}
         </div>
     );

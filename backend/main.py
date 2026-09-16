@@ -6,8 +6,9 @@ import os
 from pydantic import BaseModel
 
 # Import utils (ensure these are refactored to remove streamlit dependency)
-from utils.data_processing import load_and_merge_data, filter_by_cr_and_position
+from utils.data_processing import load_and_merge_data, filter_by_cr_and_position, score_metric
 from utils.recommendations import recommend_players_v2
+from utils.cr_history import cr_history_payload
 
 app = FastAPI(title="EuroGuru API")
 
@@ -17,33 +18,43 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # Without this every JSON POST pays a preflight round trip before the real
+    # request. The dev server proxies /api to make requests same-origin, but a
+    # cross-origin deployment still benefits.
+    max_age=3600,
 )
 
 # --- Global Data Loader ---
 # In a real app, you might want to load this on startup or cache it properly.
+# Each season lists its stats sources in priority order. 2026 prefers the fantasy
+# API's per-round log and falls back to the Euroleague boxscore file until the
+# per-round ingest has been validated against real games. 2023-2025 are frozen
+# archives - the fantasy API only serves competitions the account is enrolled in.
 DATA_FILES = {
-    '2025': 'player_stats_2025.csv',
-    '2024': 'player_stats_2024.csv',
-    '2023': 'player_stats_2023.csv'
+    '2026': ['player_stats_fantasy_2026.csv', 'player_stats_2026.csv'],
+    '2025': ['player_stats_2025.csv'],
+    '2024': ['player_stats_2024.csv'],
+    '2023': ['player_stats_2023.csv']
 }
 
+# Dashboard "Consistent Elite" cut-off. Calibrated for PIR; re-tune once there is
+# real fantasy-points data to look at.
+ELITE_SCORE_THRESHOLD = 15
+
+
 def get_data(season='2025'):
-    filename = DATA_FILES.get(season)
-    if not filename:
+    candidates = DATA_FILES.get(season)
+    if not candidates:
         raise HTTPException(status_code=404, detail="Season not found")
-    
-    # Check if file exists in current directory (backend root)
-    if not os.path.exists(filename):
-         # If not found locally, rely on S3 loader in logic, but passing local filename
-         pass
-         
-    # Data processing logic expects file path or S3 key.
-    # Assuming the copied logic works with S3, we use the key.
-    # If using local mock, we might need to adjust logic.
-    # For now, we assume the S3 bucket is accessible as it was in the original project.
-    
-    df = load_and_merge_data(filename, include_injuries=True)
-    return df
+
+    # Passing the season prices an archive from its own final snapshot instead of from
+    # today's, so the CR shown matches the end of that season's price history.
+    return load_and_merge_data(candidates, include_injuries=True, season=season)
+
+
+def _json_safe(df):
+    """Records with NaN turned into null, which json.dumps can actually encode."""
+    return df.astype(object).where(pd.notna(df), None).to_dict(orient="records")
 
 @app.get("/")
 def read_root():
@@ -53,13 +64,17 @@ def read_root():
 def get_filters(season: str = '2025'):
     df = get_data(season)
     if df.empty:
-        return {"positions": [], "min_cr": 0, "max_cr": 0}
-        
-    positions = sorted(df['position'].dropna().unique().tolist())
+        return {"positions": [], "min_cr": 0, "max_cr": 0, "score_metric": "PIR"}
+
+    # Players with no CR row have no position; drop the blanks rather than offering
+    # them as a filter option.
+    positions = sorted(p for p in df['position'].dropna().unique().tolist() if p)
     return {
         "positions": ["All"] + positions,
         "min_cr": float(df['CR'].min()),
-        "max_cr": float(df['CR'].max())
+        "max_cr": float(df['CR'].max()),
+        # Tells the UI whether Score holds fantasy points or PIR for this season.
+        "score_metric": score_metric(df)
     }
 
 class FilterParams(BaseModel):
@@ -83,10 +98,15 @@ def get_stats(params: FilterParams):
     if params.last_x_games and params.last_x_games > 0:
         # Calculate averages
         aggregated = calculate_player_averages(filtered, params.last_x_games)
-        return aggregated.fillna(0).to_dict(orient="records")
+        if "Average_Score" in aggregated.columns:
+            aggregated = aggregated.sort_values("Average_Score", ascending=False, na_position="last")
+        # Priced players with no games yet keep a null average rather than a 0, which
+        # would read as "averaged zero" instead of "hasn't played".
+        return _json_safe(aggregated)
 
-    # Default: Raw records
-    return filtered.head(200).fillna("").to_dict(orient="records")
+    # Default: Raw records. Sorting happens client-side, so a low cap here would
+    # mean "top by usage" only ever sorted an arbitrary first slice.
+    return _json_safe(filtered.head(2000))
 
 @app.post("/api/stats/aggregated")
 def get_aggregated_stats(params: FilterParams):
@@ -108,8 +128,61 @@ def get_aggregated_stats(params: FilterParams):
     
     stats_df = calculate_pir_stats(filtered, last_x)
     
-    # Return as records
-    return stats_df.fillna(0).to_dict(orient="records")
+    # Nulls, not zeros: filling zeros would report a player who never took a shot as
+    # 0% true shooting and 0 minutes, which is a different claim entirely.
+    return _json_safe(stats_df)
+
+
+@app.get("/api/player")
+def get_player_detail(name: str, season: str = '2025'):
+    """
+    One player's full profile: every game they played plus their season aggregates.
+
+    Backs the detail view, where the point is depth for a single player rather than
+    breadth across the table.
+    """
+    from utils.data_processing import calculate_player_averages
+
+    df = get_data(season)
+    if df.empty:
+        raise HTTPException(status_code=404, detail="Season has no data")
+
+    player_rows = df[df["PlayerName"] == name]
+    if player_rows.empty:
+        raise HTTPException(status_code=404, detail=f"No player named {name} in {season}")
+
+    game_log = player_rows[player_rows["GameCode"].notna()].sort_values(
+        "GameCode", ascending=False
+    )
+    season_totals = calculate_player_averages(player_rows, 100)
+
+    return {
+        "player": name,
+        "season": season,
+        "score_metric": score_metric(df),
+        "summary": _json_safe(season_totals)[0] if not season_totals.empty else {},
+        "games": _json_safe(game_log),
+    }
+
+
+@app.get("/api/cr-history")
+def get_cr_history(season: str = '2025'):
+    """
+    How every player's price moved through a season.
+
+    Built from the dated player_cr_data_*.csv snapshots the fetcher has been writing
+    all along - see utils/cr_history.py. Unlike the other endpoints this does not go
+    through get_data(): prices are their own time series, independent of whether the
+    season has a stats file at all.
+
+    The whole season ships in one response (~330 players x ~17 points) because the
+    client decides which players to draw, and re-fetching per selection would be far
+    more traffic than sending it once.
+    """
+    if season not in DATA_FILES:
+        raise HTTPException(status_code=404, detail="Season not found")
+
+    return cr_history_payload(season)
 
 
 class RecommendationParams(BaseModel):
@@ -154,25 +227,36 @@ def get_dashboard_data(season: str = '2025'):
     if df.empty:
         return {"widgets": {}, "injuries": []}
 
+    # Every widget is a buy recommendation, so restrict to players who are actually
+    # priced this season. Archive seasons are full of players no longer in the league,
+    # and without this they top the leaderboards with a blank position and no cost.
+    df = df[df["CR"].notna()]
+    if df.empty:
+        return {"widgets": {}, "injuries": []}
+
     # --- Widget 1: "Who's Hot 🔥" (Last 3 Games) ---
     stats_hot = calculate_pir_stats(df, last_x_games=3)
-    hot_players = stats_hot.sort_values('Average_PIR', ascending=False).head(5)
-    
-    # --- Widget 2: "Consistent Elite 🎯" (Last 5 Games, Avg PIR > 15, Lowest StdDev) ---
-    stats_cons = calculate_pir_stats(df, last_x_games=5)
-    # Filter for elite scorers first
-    elite = stats_cons[stats_cons['Average_PIR'] > 15]
-    if elite.empty:
-        # Fallback if no one is averaging > 15 (early season?) -> take top 20 scorers
-        elite = stats_cons.sort_values('Average_PIR', ascending=False).head(20)
-    
-    # Sort by Consistency (Lowest StdDev)
-    consistent_players = elite.sort_values('StdDev_PIR', ascending=True).head(5)
+    if stats_hot.empty:
+        return {"widgets": {}, "injuries": []}
+    hot_players = stats_hot.sort_values('Average_Score', ascending=False).head(5)
 
-    # --- Widget 3: "Budget Picks 💰" (Last 5 Games, CR < 10, Highest Avg PIR) ---
+    # --- Widget 2: "Consistent Elite 🎯" (Last 5 Games, high scorers, Lowest StdDev) ---
+    stats_cons = calculate_pir_stats(df, last_x_games=5)
+    # Filter for elite scorers first. The threshold is calibrated for PIR; on the
+    # fantasy-points scale it means something different, so the fallback below is
+    # what actually populates the widget until it is re-tuned on real round data.
+    elite = stats_cons[stats_cons['Average_Score'] > ELITE_SCORE_THRESHOLD]
+    if elite.empty:
+        # Fallback if no one clears the bar (early season?) -> take top 20 scorers
+        elite = stats_cons.sort_values('Average_Score', ascending=False).head(20)
+
+    # Sort by Consistency (Lowest StdDev)
+    consistent_players = elite.sort_values('StdDev_Score', ascending=True).head(5)
+
+    # --- Widget 3: "Budget Picks 💰" (Last 5 Games, CR < 10, Highest Avg Score) ---
     # Re-use stats_cons (Last 5 games is good baseline)
     budget = stats_cons[stats_cons['CR'] <= 10]
-    budget_players = budget.sort_values('Average_PIR', ascending=False).head(5)
+    budget_players = budget.sort_values('Average_Score', ascending=False).head(5)
 
     widgets = {
         "hot": hot_players.fillna(0).to_dict(orient="records"),
@@ -191,6 +275,8 @@ def get_dashboard_data(season: str = '2025'):
 
     return {
         "widgets": widgets,
-        "injuries": injuries
+        "injuries": injuries,
+        # Lets the widgets label their numbers correctly instead of always saying PIR.
+        "score_metric": score_metric(df)
     }
 

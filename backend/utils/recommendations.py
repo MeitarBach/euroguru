@@ -80,7 +80,7 @@ def recommend_players_v2(df,
     """
 
     # Basic checks
-    necessary_cols = {'PlayerName', 'PIR', 'CR', 'GameCode'}
+    necessary_cols = {'PlayerName', 'Score', 'CR', 'GameCode'}
     if not necessary_cols.issubset(df.columns):
         print(f"DataFrame missing required columns: {necessary_cols - set(df.columns)}")
         return None
@@ -105,48 +105,53 @@ def recommend_players_v2(df,
         if not cr or cr <= 0:
             cr = np.inf
 
-        # 1. Exponential Weighted Mean PIR
+        # 1. Exponential Weighted Mean Score
         #    For the i-th game (from most recent to oldest), weight = alpha^i
         #    More recent = smaller i, bigger weight.
-        pir_values = player_data_sorted['PIR'].values[::-1]  # oldest -> newest
-        weights = np.array([alpha**i for i in range(len(pir_values))])[::-1]  # newest -> oldest
-        # Re-reverse so it lines up properly
-        # Alternatively, you could just compute alpha^(len-1 - i)
+        score_values = pd.to_numeric(player_data_sorted['Score'], errors='coerce').values[::-1]  # oldest -> newest
+        if np.all(np.isnan(score_values)):
+            # Priced player with no games played yet (pre-season, or a new signing).
+            continue
+        score_values = np.nan_to_num(score_values, nan=0.0)
+        weights = np.array([alpha**i for i in range(len(score_values))])[::-1]  # newest -> oldest
 
-        weighted_sum = np.sum(pir_values * weights)
+        weighted_sum = np.sum(score_values * weights)
         total_weights = np.sum(weights)
-        exp_weighted_pir = weighted_sum / total_weights if total_weights > 0 else 0
+        exp_weighted_score = weighted_sum / total_weights if total_weights > 0 else 0
 
-        # 2. Cost Efficiency (Ex: (Average PIR / CR) or (exp_weighted_pir / CR))
-        efficiency = exp_weighted_pir / cr if cr > 0 else 0
+        # 2. Cost Efficiency (exp_weighted_score / CR)
+        efficiency = exp_weighted_score / cr if cr > 0 else 0
 
         # 3. Consistency Penalty -> standard deviation or standard error
-        #    We can measure how stable the player's recent PIR is.
-        pir_std = player_data_sorted['PIR'].std(ddof=1) if len(player_data_sorted) > 1 else 0
+        #    We can measure how stable the player's recent scoring is.
+        score_std = player_data_sorted['Score'].std(ddof=1) if len(player_data_sorted) > 1 else 0
         n_games = len(player_data_sorted)
-        stderr = pir_std / np.sqrt(n_games) if n_games > 0 else 0
+        stderr = score_std / np.sqrt(n_games) if n_games > 0 else 0
+        if np.isnan(stderr):
+            stderr = 0
 
-        # Combine them into a single score
-        # The logic: 
-        #   score = weight_mean_pir*(exp_weighted_pir) 
-        #          + weight_efficiency*(efficiency) 
-        #          - weight_consistency*(stderr)
-        # 
-        # Tweak the coefficients to your preference
-        score = (
-            weight_mean_pir * exp_weighted_pir
+        # Combine them into a single ranking score
+        #   RecScore = weight_mean_pir*(exp_weighted_score)
+        #            + weight_efficiency*(efficiency)
+        #            - weight_consistency*(stderr)
+        rec_score = (
+            weight_mean_pir * exp_weighted_score
             + weight_efficiency * efficiency
             - weight_consistency * stderr
         )
 
         recommendations.append({
             'PlayerName': player_name,
-            'ExpWeightedPIR': exp_weighted_pir,
+            # Carried so the client can join this row to the player's CR history.
+            'PlayerKey': (player_data_sorted['PlayerKey'].iloc[0]
+                          if 'PlayerKey' in player_data_sorted else None),
+            'ExpWeightedScore': exp_weighted_score,
             'Efficiency': efficiency,
             'CR': cr,
             'position': position,
             'StdErr': stderr,
-            'Score': score
+            # Named RecScore to keep it distinct from the per-game Score column.
+            'RecScore': rec_score
         })
 
     if not recommendations:
@@ -154,6 +159,6 @@ def recommend_players_v2(df,
         return None
 
     # Sort by score descending
-    recommendations_df = pd.DataFrame(recommendations).sort_values(by='Score', ascending=False)
+    recommendations_df = pd.DataFrame(recommendations).sort_values(by='RecScore', ascending=False)
 
     return recommendations_df
