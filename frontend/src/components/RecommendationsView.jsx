@@ -1,7 +1,54 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { fetchFilters, fetchRecommendations } from '../services/api';
 import { TrendingUp, Sliders, Award, Target } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import useDebouncedValue from '../hooks/useDebouncedValue';
+import { useOpenPlayer } from '../hooks/playerDetailContext';
+import usePriceTrend from '../hooks/usePriceTrend';
+import PriceTrend from './charts/PriceTrend';
+import GamesWindowSelect from './GamesWindowSelect';
+
+const SortIcon = ({ column, sortConfig }) => {
+    if (sortConfig.key !== column) return <div className="w-4 h-4 inline-block ml-1 opacity-20">↕</div>;
+    return (
+        <div className="w-4 h-4 inline-block ml-1 text-purple-400">
+            {sortConfig.direction === 'asc' ? '↑' : '↓'}
+        </div>
+    );
+};
+
+const Th = ({ label, sortKey, align = 'left', sortConfig, onSort }) => (
+    <th
+        className={`px-6 py-4 cursor-pointer hover:bg-[#ffffff05] transition-colors text-${align}`}
+        onClick={() => onSort(sortKey)}
+    >
+        <div className={`flex items-center gap-1 ${align === 'right' ? 'justify-end' : align === 'center' ? 'justify-center' : ''}`}>
+            {label} <SortIcon column={sortKey} sortConfig={sortConfig} />
+        </div>
+    </th>
+);
+
+// Module-level so it keeps a stable component identity. Declared inside the
+// component body it was a new type on every render, remounting all four sliders
+// mid-drag.
+const SliderControl = ({ label, value, onChange, min, max, step, description }) => (
+    <div className="flex flex-col gap-2">
+        <div className="flex items-center justify-between">
+            <label className="text-xs text-gray-400 uppercase tracking-wider font-semibold">{label}</label>
+            <span className="text-sm font-mono text-purple-400">{value.toFixed(2)}</span>
+        </div>
+        <input
+            type="range"
+            min={min}
+            max={max}
+            step={step}
+            value={value}
+            onChange={onChange}
+            className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
+        />
+        {description && <p className="text-xs text-gray-500">{description}</p>}
+    </div>
+);
 
 export default function RecommendationsView() {
     const [filters, setFilters] = useState({
@@ -20,13 +67,34 @@ export default function RecommendationsView() {
         max_cr_limit: 35
     });
 
+    const { trendFor } = usePriceTrend(filters.season);
+    const openPlayer = useOpenPlayer();
+
+    // Which metric the backend's Score column holds for the selected season.
+    const [scoreMetric, setScoreMetric] = useState('PIR');
+
+    const [filtersReady, setFiltersReady] = useState(false);
+
     const [recommendations, setRecommendations] = useState([]);
     const [loading, setLoading] = useState(false);
-    const [sortConfig, setSortConfig] = useState({ key: 'Score', direction: 'desc' });
+    const [sortConfig, setSortConfig] = useState({ key: 'RecScore', direction: 'desc' });
     const [showAdvanced, setShowAdvanced] = useState(false);
+
+    // Every one of the six sliders fires per drag step; fetches follow the settled
+    // values while the controls stay responsive.
+    const minCr = useDebouncedValue(filters.min_cr);
+    const maxCr = useDebouncedValue(filters.max_cr);
+    const alpha = useDebouncedValue(filters.alpha);
+    const wEff = useDebouncedValue(filters.weight_efficiency);
+    const wMean = useDebouncedValue(filters.weight_mean_pir);
+    const wCons = useDebouncedValue(filters.weight_consistency);
+
+    // Guards against an earlier, slower response overwriting a newer one.
+    const requestSeq = useRef(0);
 
     // Load initial filters options
     useEffect(() => {
+        setFiltersReady(false);
         loadFilters(filters.season);
     }, [filters.season]);
 
@@ -37,21 +105,51 @@ export default function RecommendationsView() {
                 min_cr_limit: data.min_cr || 0,
                 max_cr_limit: data.max_cr || 35
             });
-            setFilters(prev => ({
-                ...prev,
-                min_cr: data.min_cr || 0,
-                max_cr: data.max_cr || 35
-            }));
+            setScoreMetric(data.score_metric || 'PIR');
+            // Only update when a value actually changed - a fresh object identity
+            // alone used to refire the fetch effect and waste a request.
+            setFilters(prev => {
+                const min_cr = data.min_cr || 0;
+                const max_cr = data.max_cr || 35;
+                if (prev.min_cr === min_cr && prev.max_cr === max_cr) return prev;
+                return { ...prev, min_cr, max_cr };
+            });
         }
+        setFiltersReady(true);
     };
 
+    // Primitive deps only: identity churn on the filters object must not refetch.
+    // Nothing fetches until /api/filters has supplied the real CR bounds. Without
+    // this the first render fired a request with placeholder bounds whose response
+    // was immediately superseded - a wasted round trip on every mount.
+    // Also wait for every debounced value to catch up with its live counterpart.
+    // Mid-drag they differ, which is what collapses a drag into one request.
+    const settled = minCr === filters.min_cr
+        && maxCr === filters.max_cr
+        && alpha === filters.alpha
+        && wEff === filters.weight_efficiency
+        && wMean === filters.weight_mean_pir
+        && wCons === filters.weight_consistency;
+
     useEffect(() => {
+        if (!filtersReady || !settled) return;
         loadRecommendations();
-    }, [filters]);
+    }, [filtersReady, settled, filters.season, filters.last_x_games, minCr, maxCr, alpha, wEff, wMean, wCons]);
 
     const loadRecommendations = async () => {
+        const seq = ++requestSeq.current;
         setLoading(true);
-        const data = await fetchRecommendations(filters);
+        const data = await fetchRecommendations({
+            season: filters.season,
+            last_x_games: filters.last_x_games,
+            min_cr: minCr,
+            max_cr: maxCr,
+            alpha,
+            weight_efficiency: wEff,
+            weight_mean_pir: wMean,
+            weight_consistency: wCons
+        });
+        if (seq !== requestSeq.current) return; // a newer request has taken over
         setRecommendations(data || []);
         setLoading(false);
     };
@@ -64,7 +162,7 @@ export default function RecommendationsView() {
         setSortConfig({ key, direction });
     };
 
-    const getSortedRecommendations = () => {
+    const sortedRecommendations = useMemo(() => {
         let sortableItems = [...recommendations];
         if (sortConfig.key !== null) {
             sortableItems.sort((a, b) => {
@@ -87,48 +185,7 @@ export default function RecommendationsView() {
             });
         }
         return sortableItems;
-    };
-
-    const sortedRecommendations = getSortedRecommendations();
-
-    const SortIcon = ({ column }) => {
-        if (sortConfig.key !== column) return <div className="w-4 h-4 inline-block ml-1 opacity-20">↕</div>;
-        return (
-            <div className="w-4 h-4 inline-block ml-1 text-purple-400">
-                {sortConfig.direction === 'asc' ? '↑' : '↓'}
-            </div>
-        );
-    };
-
-    const Th = ({ label, sortKey, align = 'left' }) => (
-        <th
-            className={`px-6 py-4 cursor-pointer hover:bg-[#ffffff05] transition-colors text-${align}`}
-            onClick={() => requestSort(sortKey)}
-        >
-            <div className={`flex items-center gap-1 ${align === 'right' ? 'justify-end' : align === 'center' ? 'justify-center' : ''}`}>
-                {label} <SortIcon column={sortKey} />
-            </div>
-        </th>
-    );
-
-    const SliderControl = ({ label, value, onChange, min, max, step, description }) => (
-        <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-                <label className="text-xs text-gray-400 uppercase tracking-wider font-semibold">{label}</label>
-                <span className="text-sm font-mono text-purple-400">{value.toFixed(2)}</span>
-            </div>
-            <input
-                type="range"
-                min={min}
-                max={max}
-                step={step}
-                value={value}
-                onChange={onChange}
-                className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
-            />
-            {description && <p className="text-xs text-gray-500">{description}</p>}
-        </div>
-    );
+    }, [recommendations, sortConfig]);
 
     return (
         <div className="space-y-6">
@@ -162,24 +219,17 @@ export default function RecommendationsView() {
                             onChange={(e) => setFilters(prev => ({ ...prev, season: e.target.value }))}
                             className="input-dark bg-[#0a0a0c] min-w-[100px]"
                         >
-                            <option value="2025">2024-25</option>
-                            <option value="2024">2023-24</option>
-                            <option value="2023">2022-23</option>
+                            <option value="2026">2026-27</option>
+                            <option value="2025">2025-26</option>
+                            <option value="2024">2024-25</option>
+                            <option value="2023">2023-24</option>
                         </select>
                     </div>
 
-                    <div className="flex flex-col gap-1">
-                        <label className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Last X Games</label>
-                        <select
-                            value={filters.last_x_games}
-                            onChange={(e) => setFilters(prev => ({ ...prev, last_x_games: parseInt(e.target.value) }))}
-                            className="input-dark bg-[#0a0a0c] min-w-[120px]"
-                        >
-                            <option value="3">Last 3 Games</option>
-                            <option value="5">Last 5 Games</option>
-                            <option value="10">Last 10 Games</option>
-                        </select>
-                    </div>
+                    <GamesWindowSelect
+                        value={filters.last_x_games}
+                        onChange={(v) => setFilters(prev => ({ ...prev, last_x_games: v }))}
+                    />
 
                     <div className="flex flex-col gap-1 flex-1 min-w-[200px]">
                         <label className="text-xs text-gray-500 uppercase tracking-wider font-semibold">
@@ -278,27 +328,26 @@ export default function RecommendationsView() {
                                             Rank
                                         </div>
                                     </th>
-                                    <Th label="Player" sortKey="PlayerName" />
-                                    <Th label="Position" sortKey="position" />
-                                    <Th label="Cost (CR)" sortKey="CR" align="right" />
-                                    <Th label="Exp Weighted PIR" sortKey="ExpWeightedPIR" align="right" />
-                                    <Th label="Efficiency" sortKey="Efficiency" align="right" />
-                                    <Th label="Std Error" sortKey="StdErr" align="right" />
-                                    <Th label="Score" sortKey="Score" align="right" />
+                                    <Th label="Player" sortKey="PlayerName" sortConfig={sortConfig} onSort={requestSort} />
+                                    <Th label="Position" sortKey="position" sortConfig={sortConfig} onSort={requestSort} />
+                                    <Th label="Cost (CR)" sortKey="CR" align="right" sortConfig={sortConfig} onSort={requestSort} />
+                                    {/* Not sortable: the cell is a chart, and the
+                                        sortable figure behind it is the CR column. */}
+                                    <th className="px-4 py-4 text-left whitespace-nowrap">Price trend</th>
+                                    <Th label={`Exp Weighted ${scoreMetric}`} sortKey="ExpWeightedScore" align="right" sortConfig={sortConfig} onSort={requestSort} />
+                                    <Th label="Efficiency" sortKey="Efficiency" align="right" sortConfig={sortConfig} onSort={requestSort} />
+                                    <Th label="Std Error" sortKey="StdErr" align="right" sortConfig={sortConfig} onSort={requestSort} />
+                                    <Th label="Score" sortKey="RecScore" align="right" sortConfig={sortConfig} onSort={requestSort} />
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-[#ffffff08]">
-                                <AnimatePresence>
                                     {sortedRecommendations.map((player, idx) => {
                                         const isTopPick = idx < 3;
                                         return (
-                                            <motion.tr
-                                                key={idx}
-                                                initial={{ opacity: 0, y: 10 }}
-                                                animate={{ opacity: 1, y: 0 }}
-                                                exit={{ opacity: 0 }}
-                                                transition={{ delay: idx * 0.01, duration: 0.2 }}
-                                                className={`hover:bg-[#ffffff03] transition-colors ${isTopPick ? 'bg-gradient-to-r from-purple-500/5 to-transparent' : ''
+                                            <tr
+                                                key={player.PlayerName ?? idx}
+                                                onClick={() => openPlayer(player.PlayerName, filters.season)}
+                                                className={`hover:bg-[#ffffff03] transition-colors cursor-pointer ${isTopPick ? 'bg-gradient-to-r from-purple-500/5 to-transparent' : ''
                                                     }`}
                                             >
                                                 <td className="px-6 py-3">
@@ -324,8 +373,11 @@ export default function RecommendationsView() {
                                                 <td className="px-6 py-3 text-right font-mono text-purple-300">
                                                     {typeof player.CR === 'number' ? player.CR.toFixed(1) : player.CR}
                                                 </td>
+                                                <td className="px-4 py-3">
+                                                    <PriceTrend trend={trendFor(player)} />
+                                                </td>
                                                 <td className="px-6 py-3 text-right font-mono text-white">
-                                                    {typeof player.ExpWeightedPIR === 'number' ? player.ExpWeightedPIR.toFixed(2) : player.ExpWeightedPIR}
+                                                    {typeof player.ExpWeightedScore === 'number' ? player.ExpWeightedScore.toFixed(2) : player.ExpWeightedScore}
                                                 </td>
                                                 <td className="px-6 py-3 text-right font-mono text-green-400">
                                                     {typeof player.Efficiency === 'number' ? player.Efficiency.toFixed(3) : player.Efficiency}
@@ -334,16 +386,15 @@ export default function RecommendationsView() {
                                                     {typeof player.StdErr === 'number' ? player.StdErr.toFixed(2) : player.StdErr}
                                                 </td>
                                                 <td className="px-6 py-3 text-right font-mono font-bold text-purple-400">
-                                                    {typeof player.Score === 'number' ? player.Score.toFixed(2) : player.Score}
+                                                    {typeof player.RecScore === 'number' ? player.RecScore.toFixed(2) : player.RecScore}
                                                 </td>
-                                            </motion.tr>
+                                            </tr>
                                         );
                                     })}
-                                </AnimatePresence>
 
                                 {sortedRecommendations.length === 0 && (
                                     <tr>
-                                        <td colSpan={8} className="px-6 py-12 text-center text-gray-500">
+                                        <td colSpan={9} className="px-6 py-12 text-center text-gray-500">
                                             No recommendations found. Try adjusting your filters.
                                         </td>
                                     </tr>

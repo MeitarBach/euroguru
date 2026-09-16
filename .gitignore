@@ -1,6 +1,9 @@
 # Environment variables (contains secrets)
 .env
 
+# Generated CA bundle for TLS-inspecting proxies (machine-specific, see run_euroguru.sh)
+backend/.ca-bundle.pem
+
 # Python
 __pycache__/
 *.py[cod]

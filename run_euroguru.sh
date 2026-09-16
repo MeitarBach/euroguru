@@ -26,6 +26,24 @@ else
     exit 1
 fi
 
+# TLS-inspecting proxies (Cloudflare WARP, and corporate MITM generally) re-sign every
+# certificate, which Python's bundled certifi roots reject - boto3 then fails every S3
+# call with CERTIFICATE_VERIFY_FAILED while curl, which trusts the system keychain,
+# works fine. Splicing the proxy's root onto certifi's makes both trustworthy. Neither
+# bundle alone is enough: certifi lacks the proxy root, the proxy root lacks the rest.
+CF_CERTS=(/Library/Application\ Support/Cloudflare/installed_cert.pem \
+          /Library/Application\ Support/Cloudflare/installed_certs/*.pem)
+if [ -f "${CF_CERTS[0]}" ]; then
+    CA_BUNDLE="$SCRIPT_DIR/backend/.ca-bundle.pem"
+    python -c "import certifi,sys; sys.stdout.write(open(certifi.where()).read())" > "$CA_BUNDLE"
+    for cert in "${CF_CERTS[@]}"; do
+        [ -f "$cert" ] && cat "$cert" >> "$CA_BUNDLE"
+    done
+    export AWS_CA_BUNDLE="$CA_BUNDLE"
+    export REQUESTS_CA_BUNDLE="$CA_BUNDLE"
+    echo "✅ CA bundle built for TLS-inspecting proxy ($CA_BUNDLE)"
+fi
+
 # Step 1: Run the fetch script to update data
 echo ""
 echo "📥 Step 1/3: Fetching latest data..."

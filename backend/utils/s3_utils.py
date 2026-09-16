@@ -1,4 +1,5 @@
 import os
+import threading
 import boto3
 import pandas as pd
 from botocore.exceptions import NoCredentialsError, ClientError
@@ -10,15 +11,53 @@ load_dotenv()
 AWS_ACCESS_KEY = os.environ["AWS_ACCESS_KEY"]
 AWS_SECRET_KEY = os.environ["AWS_SECRET_KEY"]
 BUCKET_NAME = os.environ.get("BUCKET_NAME", "fantassistant-lambda-dev")
+# The bucket really lives in us-east-1; this used to be hardcoded to eu-central-1
+# with a comment admitting it was a guess.
+AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
+
+_client = None
+_client_lock = threading.Lock()
 
 def get_s3_client():
-    """Initialize and return an S3 client using credentials."""
-    return boto3.client(
-        's3',
-        aws_access_key_id=AWS_ACCESS_KEY,
-        aws_secret_access_key=AWS_SECRET_KEY,
-        region_name='eu-central-1' # Guessing region, or default
-    )
+    """
+    Return the shared S3 client, creating it on first use.
+
+    Constructing a client per call cost ~1.2s each in session, credential and
+    endpoint resolution plus a fresh TLS handshake - the same object took 1.4s
+    with a new client versus 0.2s on a reused one. botocore clients are
+    thread-safe for client operations, so one instance serves FastAPI's
+    sync-endpoint threadpool.
+    """
+    global _client
+    if _client is None:
+        with _client_lock:
+            if _client is None:
+                _client = boto3.client(
+                    's3',
+                    aws_access_key_id=AWS_ACCESS_KEY,
+                    aws_secret_access_key=AWS_SECRET_KEY,
+                    region_name=AWS_REGION,
+                )
+    return _client
+
+def list_bucket(bucket_name=BUCKET_NAME):
+    """
+    Return {key: LastModified} for the whole bucket in one round trip (~0.18s).
+
+    One listing is enough to discover the newest CR file and to tell whether any
+    cached frame is still current, which replaces a day-by-day probe loop that
+    cost up to 15 sequential GETs. Paginated because it is free to do so - the
+    bucket holds ~31 objects today, well under the 1000-key page limit.
+    """
+    client = get_s3_client()
+    index = {}
+    try:
+        for page in client.get_paginator('list_objects_v2').paginate(Bucket=bucket_name):
+            for obj in page.get('Contents', []):
+                index[obj['Key']] = obj['LastModified']
+    except (NoCredentialsError, ClientError) as e:
+        print(f"Failed to list bucket {bucket_name}: {e}")
+    return index
 
 def save_to_s3(filename, df, bucket_name=BUCKET_NAME):
     """
