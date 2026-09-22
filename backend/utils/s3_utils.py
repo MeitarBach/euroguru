@@ -8,12 +8,39 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-AWS_ACCESS_KEY = os.environ["AWS_ACCESS_KEY"]
-AWS_SECRET_KEY = os.environ["AWS_SECRET_KEY"]
+def _credential(*names):
+    """
+    First of these environment variables that is set.
+
+    Two names each, because the deployed environment cannot use the original ones:
+    Vercel functions run on Lambda, which owns every AWS_* name, so the dashboard
+    rejects AWS_ACCESS_KEY as reserved. S3_* is what production sets; AWS_* still
+    works so an existing local .env keeps running unchanged.
+    """
+    for name in names:
+        value = os.environ.get(name)
+        if value:
+            return value
+    return None
+
+
+S3_ACCESS_KEY = _credential("S3_ACCESS_KEY", "AWS_ACCESS_KEY")
+S3_SECRET_KEY = _credential("S3_SECRET_KEY", "AWS_SECRET_KEY")
+
+if not S3_ACCESS_KEY or not S3_SECRET_KEY:
+    # Raised at import, which is also when this module is first loaded by the API.
+    # Spelled out because the previous os.environ[...] lookup failed with a bare
+    # KeyError that said nothing about which platform expects which name.
+    raise RuntimeError(
+        "No S3 credentials in the environment. Set S3_ACCESS_KEY and S3_SECRET_KEY "
+        "(AWS_ACCESS_KEY / AWS_SECRET_KEY also work locally, but Vercel reserves "
+        "the AWS_ prefix)."
+    )
+
 BUCKET_NAME = os.environ.get("BUCKET_NAME", "fantassistant-lambda-dev")
 # The bucket really lives in us-east-1; this used to be hardcoded to eu-central-1
-# with a comment admitting it was a guess.
-AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
+# with a comment admitting it was a guess. AWS_REGION is reserved on Vercel too.
+AWS_REGION = _credential("S3_REGION", "AWS_REGION") or "us-east-1"
 
 _client = None
 _client_lock = threading.Lock()
@@ -34,8 +61,8 @@ def get_s3_client():
             if _client is None:
                 _client = boto3.client(
                     's3',
-                    aws_access_key_id=AWS_ACCESS_KEY,
-                    aws_secret_access_key=AWS_SECRET_KEY,
+                    aws_access_key_id=S3_ACCESS_KEY,
+                    aws_secret_access_key=S3_SECRET_KEY,
                     region_name=AWS_REGION,
                 )
     return _client
