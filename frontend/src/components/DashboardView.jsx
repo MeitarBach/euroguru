@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { fetchDashboardData } from '../services/api';
-import { TrendingUp, Activity, AlertCircle, Award, Flame, Target, Banknote } from 'lucide-react';
+import { Activity, ChevronDown, ChevronUp, Flame, Target, Banknote } from 'lucide-react';
+import { statusOf, statusRank } from '../injuries';
 import { useOpenPlayer } from '../hooks/playerDetailContext';
 import usePriceTrend from '../hooks/usePriceTrend';
 import PriceTrend from './charts/PriceTrend';
@@ -99,6 +100,133 @@ const WidgetColumn = ({ title, subtitle, icon: Icon, players, type, color, metri
     </div>
 );
 
+// How many rows the panel shows before "Show all". Enough to be useful at a glance
+// without the list pushing the widgets above it off the screen.
+const INJURY_PREVIEW = 9;
+
+const InjuryRow = ({ inj, onOpen }) => {
+    const status = statusOf(inj.InjuryStatus);
+    return (
+        // The injury feed is a separate source (Rotowire) and names a player as
+        // `Player`, which does not always match a PlayerName in the stats. Clicking
+        // still works; the detail view says so plainly when the name resolves to nothing.
+        <button
+            onClick={() => onOpen?.(inj.Player)}
+            title={inj.InjuryStatus}
+            className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-left text-sm
+                       hover:bg-[#ffffff08] transition-colors"
+        >
+            <span className={`w-2 h-2 rounded-full shrink-0 ${status.dot}`} />
+            <span className="text-gray-200 truncate">{inj.Player}</span>
+            <span className="text-[11px] text-gray-600 shrink-0">{inj.Team}</span>
+            <span className="ml-auto flex items-center gap-2.5 shrink-0 pl-2">
+                <span className="text-xs text-gray-500 truncate max-w-[140px]">{inj.Injury}</span>
+                <span className={`text-[10px] font-medium w-8 text-right ${status.text}`}>
+                    {status.short}
+                </span>
+            </span>
+        </button>
+    );
+};
+
+/**
+ * Every injured player, grouped by how badly, collapsed until asked.
+ *
+ * The count in the header is the point: this panel used to render whatever the API
+ * sent and the API silently sent the first ten of twenty-nine, so there was no way to
+ * tell the list was partial.
+ */
+const InjuryPanel = ({ injuries, onOpen }) => {
+    const [expanded, setExpanded] = useState(false);
+
+    // Ruled-out players force a lineup change, so they sort first; the backend's
+    // Team/Player ordering is preserved within each group.
+    const groups = useMemo(() => {
+        const byStatus = new Map();
+        for (const inj of injuries) {
+            const { key, label, short, text } = statusOf(inj.InjuryStatus);
+            if (!byStatus.has(key)) byStatus.set(key, { key, label, short, text, rows: [] });
+            byStatus.get(key).rows.push(inj);
+        }
+        return [...byStatus.values()].sort(
+            (a, b) => statusRank(a.key) - statusRank(b.key)
+        );
+    }, [injuries]);
+
+    // Each group's visible slice. Derived from how many rows precede the group rather
+    // than by decrementing a running counter - a reassignment like that outlives the
+    // render and the React compiler rejects it. The preview budget is therefore spent
+    // in group order, so a collapsed panel leads with OUT and only then shows GTD.
+    const visible = useMemo(() => {
+        const limit = expanded ? Infinity : INJURY_PREVIEW;
+        return groups.map((group, i) => {
+            const before = groups.slice(0, i).reduce((n, g) => n + g.rows.length, 0);
+            return { ...group, shown: group.rows.slice(0, Math.max(0, limit - before)) };
+        });
+    }, [groups, expanded]);
+
+    if (!injuries.length) {
+        return (
+            <div className="glass-panel p-5">
+                <h3 className="font-bold text-gray-200 mb-2 flex items-center gap-2">
+                    <Activity size={18} className="text-red-500" /> Injuries
+                </h3>
+                <p className="text-gray-500 text-sm">No injury reports available.</p>
+            </div>
+        );
+    }
+
+    return (
+        <div className="glass-panel p-5">
+            <div className="flex items-center justify-between gap-4 mb-3">
+                <h3 className="font-bold text-gray-200 flex items-center gap-2">
+                    <Activity size={18} className="text-red-500" /> Injuries
+                </h3>
+                <div className="flex items-center gap-3 text-xs">
+                    {groups.map(g => (
+                        <span key={g.key} className={g.text}>
+                            {g.rows.length} {g.short || 'other'}
+                        </span>
+                    ))}
+                </div>
+            </div>
+
+            <div className="space-y-3">
+                {visible.map(group => (
+                    group.shown.length === 0 ? null : (
+                        <div key={group.key}>
+                            <div className="px-2 pb-1 text-[10px] uppercase tracking-wider text-gray-600 font-semibold">
+                                {group.label || 'Other'} ({group.rows.length})
+                            </div>
+                            {/* Up to three columns: a single column leaves most of the
+                                panel empty and strands the injury text far from the name
+                                it belongs to, since each row spreads to fill its width. */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-x-5">
+                                {group.shown.map((inj, i) => (
+                                    <InjuryRow key={`${inj.Player}-${i}`} inj={inj} onOpen={onOpen} />
+                                ))}
+                            </div>
+                        </div>
+                    )
+                ))}
+            </div>
+
+            {injuries.length > INJURY_PREVIEW && (
+                <button
+                    onClick={() => setExpanded(v => !v)}
+                    className="mt-3 w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg
+                               text-xs font-medium text-gray-500 hover:text-gray-300
+                               hover:bg-[#ffffff05] transition-colors"
+                >
+                    {expanded
+                        ? <>Show less <ChevronUp size={14} /></>
+                        : <>Show all {injuries.length} <ChevronDown size={14} /></>}
+                </button>
+            )}
+        </div>
+    );
+};
+
 export default function DashboardView() {
     const [data, setData] = useState({ widgets: {}, injuries: [] });
     const [metric, setMetric] = useState('PIR');
@@ -171,34 +299,7 @@ export default function DashboardView() {
                 />
             </div>
 
-            <div className="glass-panel p-5">
-                <h3 className="font-bold text-gray-200 mb-4 flex items-center gap-2">
-                    <Activity size={18} className="text-red-500" /> Recent Injuries
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {data.injuries.length > 0 ? data.injuries.map((inj, i) => (
-                        // The injury feed is a separate source (Rotowire) and names a
-                        // player as `Player`, which does not always match a PlayerName
-                        // in the stats. Clicking still works; the detail view says so
-                        // plainly when the name resolves to nothing.
-                        <div
-                            key={i}
-                            onClick={() => open(inj.Player)}
-                            className="flex items-start gap-3 p-3 rounded-lg bg-red-500/5 border border-red-500/10
-                                       hover:bg-red-500/10 transition-colors cursor-pointer"
-                        >
-                            <AlertCircle size={16} className="text-red-500 mt-1" />
-                            <div>
-                                <div className="font-medium text-gray-200">{inj.Player} <span className="text-gray-500 text-xs">({inj.Team})</span></div>
-                                <div className="text-sm text-red-400 font-medium">{inj.InjuryStatus}</div>
-                                <div className="text-xs text-gray-500 mt-1">{inj.Injury}</div>
-                            </div>
-                        </div>
-                    )) : (
-                        <div className="text-gray-500 col-span-3">No recent injury reports available.</div>
-                    )}
-                </div>
-            </div>
+            <InjuryPanel injuries={data.injuries} onOpen={open} />
         </div>
     );
 }

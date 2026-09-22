@@ -1,19 +1,5 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-
-  "comment": [
-    "The browser must see the API on the same origin as the app. api.js defaults to",
-    "a relative '/api' for exactly this reason: a cross-origin JSON POST is a",
-    "non-simple request, so every call would pay a CORS preflight round trip first.",
-    "This rewrite is the production equivalent of the dev-server proxy in",
-    "vite.config.js - Vercel forwards the request server-side, so the browser never",
-    "learns the API lives elsewhere.",
-    "",
-    "Points at the euroguru-api project's stable production alias, not at a",
-    "deployment URL - those are regenerated on every deploy and would break the",
-    "next time the backend ships."
-  ],
-
   "rewrites": [
     {
       "source": "/api/:path*",

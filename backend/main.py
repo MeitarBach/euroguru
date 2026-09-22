@@ -306,13 +306,18 @@ def get_dashboard_data(season: str = '2025'):
     }
 
     # 4. Injuries (if available)
+    # The whole report, not a slice. This used to be head(10), which hid 19 of 29
+    # players with nothing in the UI saying so - the client decides what to show and
+    # how much to collapse. Around 6KB, on an endpoint that is already edge-cached.
     injuries = []
     try:
         inj_df = load_injuries_df()
         if not inj_df.empty:
-             injuries = inj_df.head(10).fillna("").to_dict(orient="records")
-    except:
-        pass
+            injuries = inj_df.fillna("").to_dict(orient="records")
+    except Exception as e:
+        # Injuries are decoration on this endpoint; the widgets are the point. Say so
+        # rather than swallowing it silently, which is what a bare except did before.
+        print(f"[dashboard] injuries unavailable: {e}")
 
     return {
         "widgets": widgets,

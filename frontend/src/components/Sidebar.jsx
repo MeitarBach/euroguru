@@ -15,11 +15,18 @@ export default function Sidebar({ activeTab, setActiveTab }) {
 
             {/* Brand */}
             <div className="flex items-center gap-3 mb-8 px-2 mt-2">
-                <div className="text-3xl">🏀</div>
-                <div>
-                    <h1 className="font-bold text-xl text-white tracking-tight">EuroGuru</h1>
-                    <span className="text-xs text-purple-400 font-medium">PREMIUM</span>
-                </div>
+                {/* Served from public/, like every other static asset here, rather than
+                    imported as a module. alt is empty on purpose: the <h1> beside it
+                    already says "EuroGuru", so a label here would just repeat it. */}
+                <img
+                    src="/guru-mark.png"
+                    alt=""
+                    className="h-10 w-auto shrink-0"
+                />
+                {/* A plan badge sat under this name until there were plans to tell apart.
+                    It belongs back here once authentication lands - wrap this h1 and the
+                    badge in a div again, which is what stacked them. */}
+                <h1 className="font-bold text-xl text-white tracking-tight">EuroGuru</h1>
             </div>
 
             {/* Menu */}

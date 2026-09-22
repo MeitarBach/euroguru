@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { fetchFilters, fetchStats } from '../services/api';
 import { Search, Filter, Download, List, TrendingUp, BarChart2 } from 'lucide-react';
 import useDebouncedValue from '../hooks/useDebouncedValue';
+import { statusOf } from '../injuries';
 import { useOpenPlayer } from '../hooks/playerDetailContext';
 import InfoTip from './InfoTip';
 import ColumnPicker from './ColumnPicker';
@@ -352,8 +353,14 @@ export default function StatsView() {
                                                         <td key={col.id} className="px-4 py-3 font-medium text-white whitespace-nowrap">
                                                             {player.PlayerName}
                                                             {player.InjuryStatus && (
-                                                                <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/30">
-                                                                    {player.InjuryStatus}
+                                                                // Abbreviated and tone-matched via the shared helper: the raw
+                                                                // feed value for a game-time decision is the full phrase, which
+                                                                // would widen this column well past the name it annotates.
+                                                                <span
+                                                                    title={player.InjuryStatus}
+                                                                    className={`ml-2 text-[10px] px-1.5 py-0.5 rounded border ${statusOf(player.InjuryStatus).chip}`}
+                                                                >
+                                                                    {statusOf(player.InjuryStatus).short}
                                                                 </span>
                                                             )}
                                                         </td>
