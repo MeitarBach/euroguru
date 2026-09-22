@@ -9,14 +9,15 @@
     "vite.config.js - Vercel forwards the request server-side, so the browser never",
     "learns the API lives elsewhere.",
     "",
-    "Replace REPLACE_WITH_BACKEND_URL below with the backend project's production",
-    "domain once it is deployed, e.g. https://euroguru-api.vercel.app"
+    "Points at the euroguru-api project's stable production alias, not at a",
+    "deployment URL - those are regenerated on every deploy and would break the",
+    "next time the backend ships."
   ],
 
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://REPLACE_WITH_BACKEND_URL/api/:path*"
+      "destination": "https://euroguru-api.vercel.app/api/:path*"
     }
   ]
 }
