@@ -24,6 +24,47 @@ app.add_middleware(
     max_age=3600,
 )
 
+# How long the CDN may serve a cached API response, and how long it may keep serving
+# a stale one while it refreshes in the background.
+EDGE_TTL_SECONDS = int(os.environ.get("EDGE_TTL_SECONDS", 300))
+EDGE_STALE_SECONDS = int(os.environ.get("EDGE_STALE_SECONDS", 86_400))
+
+
+@app.middleware("http")
+async def edge_cache(request, call_next):
+    """
+    Let the CDN answer most requests so a cold container is rarely on the hot path.
+
+    This app's own cache is LastModified-validated rather than timed, deliberately -
+    a fetch-script upload is visible on the very next request. That guarantee holds
+    for the process, but on serverless the process is usually *new*: ~0.6s to import
+    pandas and ~2.5s to rebuild the merged frame, paid by whoever arrives first after
+    an idle period.
+
+    s-maxage applies to the shared CDN cache only, never the browser, so a hard
+    refresh still reaches the origin. stale-while-revalidate is what actually removes
+    the cold start from the user's path: past the TTL the edge serves the old answer
+    immediately and refreshes behind it, so nobody waits on a container boot.
+
+    The data changes at most once a day, and only when the fetch script is run by
+    hand, so a few minutes of staleness costs nothing. Set EDGE_TTL_SECONDS=0 to turn
+    this off and go straight to the origin every time.
+    """
+    response = await call_next(request)
+
+    cacheable = (
+        request.method == "GET"
+        and response.status_code == 200
+        and request.url.path.startswith("/api/")
+        and EDGE_TTL_SECONDS > 0
+    )
+    if cacheable:
+        response.headers["Cache-Control"] = (
+            f"public, max-age=0, s-maxage={EDGE_TTL_SECONDS}, "
+            f"stale-while-revalidate={EDGE_STALE_SECONDS}"
+        )
+    return response
+
 # --- Global Data Loader ---
 # In a real app, you might want to load this on startup or cache it properly.
 # Each season lists its stats sources in priority order. 2026 prefers the fantasy

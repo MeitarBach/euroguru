@@ -1,0 +1,15 @@
+# Never upload these to Vercel. .gitignore already covers a git-triggered deploy,
+# but `vercel --prod` from this directory uploads the working tree, and the venv
+# alone is 169MB - more than half the 250MB function budget - before a single
+# dependency is installed from requirements.txt.
+venv/
+myenv/
+__pycache__/
+*.pyc
+
+# Secrets. These stay on your machine and in the Vercel dashboard, never in a bundle.
+.env
+.ca-bundle.pem
+
+# Archive CSVs kept locally for reference; the app reads everything from S3.
+player_stats_*.csv

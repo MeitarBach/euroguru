@@ -1,3 +1,4 @@
+import os
 import sys
 
 from utils.data_fetchers import (
@@ -15,6 +16,25 @@ from utils.cr_history import rebuild_cr_history
 # The season the nightly fetch keeps up to date. Named rather than repeated so the
 # stats files, the schedule and the season label cannot drift apart.
 CURRENT_SEASON = "2026"
+
+
+def _refuse_to_write_to_prod():
+    """
+    Stop a fetch that would write straight into the prod bucket.
+
+    Everything below overwrites objects in whatever BUCKET_NAME points at, with data
+    that has not been looked at yet. Prod is supposed to receive data only through
+    promote.py, after it has rendered correctly locally - a stray BUCKET_NAME would
+    otherwise route a half-finished backfill directly to the deployed app.
+    """
+    from utils.s3_utils import BUCKET_NAME
+
+    prod = os.environ.get("PROD_BUCKET_NAME", "euroguru-prod")
+    if BUCKET_NAME == prod:
+        print(f"Refusing to run: BUCKET_NAME is {BUCKET_NAME!r}, the prod bucket.")
+        print("Fetchers write unreviewed data. Point BUCKET_NAME at dev and use")
+        print("`python promote.py` to publish once you have checked the result.")
+        sys.exit(2)
 
 
 def show_status(season="2025"):
@@ -178,6 +198,10 @@ def run_fetch():
     return 0 if cr_ok else 1
 
 if __name__ == "__main__":
+    # --status is read-only; everything else writes.
+    if "--status" not in sys.argv:
+        _refuse_to_write_to_prod()
+
     if "--status" in sys.argv:
         idx = sys.argv.index("--status")
         season = sys.argv[idx + 1] if len(sys.argv) > idx + 1 else "2025"
