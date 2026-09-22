@@ -6,6 +6,7 @@ import useDebouncedValue from '../hooks/useDebouncedValue';
 import { COLUMNS, columnKey, columnLabel, loadStored, storeValue } from '../columns';
 import ChartCanvas from './charts/ChartCanvas';
 import ChartBuilderModal from './ChartBuilderModal';
+import CrRangeSlider from './CrRangeSlider';
 import GamesWindowSelect from './GamesWindowSelect';
 
 const CHARTS_STORAGE_KEY = 'euroguru.courtVision.charts';
@@ -260,19 +261,13 @@ export default function CourtVisionView() {
                         {options.positions.map(p => <option key={p} value={p}>{p}</option>)}
                     </select>
                 </div>
-                <div className="flex flex-col gap-1 flex-1 min-w-[200px]">
-                    <label className="text-xs text-gray-500 uppercase tracking-wider font-semibold">
-                        Cost Range ({filters.min_cr} - {filters.max_cr} CR)
-                    </label>
-                    <input
-                        type="range"
-                        min={options.min_cr_limit}
-                        max={options.max_cr_limit}
-                        value={filters.max_cr}
-                        onChange={(e) => setFilters(prev => ({ ...prev, max_cr: parseFloat(e.target.value) }))}
-                        className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
-                    />
-                </div>
+                <CrRangeSlider
+                    min={filters.min_cr}
+                    max={filters.max_cr}
+                    limitMin={options.min_cr_limit}
+                    limitMax={options.max_cr_limit}
+                    onChange={({ min, max }) => setFilters(prev => ({ ...prev, min_cr: min, max_cr: max }))}
+                />
                 <span className="text-xs text-gray-500">{rows.length} players</span>
             </div>
 

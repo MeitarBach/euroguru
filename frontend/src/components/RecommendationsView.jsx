@@ -6,6 +6,7 @@ import useDebouncedValue from '../hooks/useDebouncedValue';
 import { useOpenPlayer } from '../hooks/playerDetailContext';
 import usePriceTrend from '../hooks/usePriceTrend';
 import PriceTrend from './charts/PriceTrend';
+import CrRangeSlider from './CrRangeSlider';
 import GamesWindowSelect from './GamesWindowSelect';
 
 const SortIcon = ({ column, sortConfig }) => {
@@ -231,29 +232,16 @@ export default function RecommendationsView() {
                         onChange={(v) => setFilters(prev => ({ ...prev, last_x_games: v }))}
                     />
 
-                    <div className="flex flex-col gap-1 flex-1 min-w-[200px]">
-                        <label className="text-xs text-gray-500 uppercase tracking-wider font-semibold">
-                            Cost Range ({filters.min_cr} - {filters.max_cr} CR)
-                        </label>
-                        <div className="flex items-center gap-2">
-                            <input
-                                type="range"
-                                min={options.min_cr_limit}
-                                max={options.max_cr_limit}
-                                value={filters.min_cr}
-                                onChange={(e) => setFilters(prev => ({ ...prev, min_cr: parseFloat(e.target.value) }))}
-                                className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
-                            />
-                            <input
-                                type="range"
-                                min={options.min_cr_limit}
-                                max={options.max_cr_limit}
-                                value={filters.max_cr}
-                                onChange={(e) => setFilters(prev => ({ ...prev, max_cr: parseFloat(e.target.value) }))}
-                                className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
-                            />
-                        </div>
-                    </div>
+                    {/* Was two independent sliders side by side, which let the minimum be
+                        dragged above the maximum and return nothing. One control, two
+                        thumbs, each clamped by the other. */}
+                    <CrRangeSlider
+                        min={filters.min_cr}
+                        max={filters.max_cr}
+                        limitMin={options.min_cr_limit}
+                        limitMax={options.max_cr_limit}
+                        onChange={({ min, max }) => setFilters(prev => ({ ...prev, min_cr: min, max_cr: max }))}
+                    />
                 </div>
 
                 {/* Advanced Settings */}

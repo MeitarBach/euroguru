@@ -6,6 +6,7 @@ import { statusOf } from '../injuries';
 import { useOpenPlayer } from '../hooks/playerDetailContext';
 import InfoTip from './InfoTip';
 import ColumnPicker from './ColumnPicker';
+import CrRangeSlider from './CrRangeSlider';
 import GamesWindowSelect from './GamesWindowSelect';
 import {
     COLUMNS, COLUMN_CATEGORIES, DEFAULT_COLUMN_IDS,
@@ -297,21 +298,13 @@ export default function StatsView() {
                     </div>
                 )}
 
-                <div className="flex flex-col gap-1 flex-1 min-w-[200px]">
-                    <label className="text-xs text-gray-500 uppercase tracking-wider font-semibold">
-                        Cost Range ({filters.min_cr} - {filters.max_cr} CR)
-                    </label>
-                    <div className="flex items-center gap-2">
-                        <input
-                            type="range"
-                            min={options.min_cr_limit}
-                            max={options.max_cr_limit}
-                            value={filters.max_cr}
-                            onChange={(e) => setFilters(prev => ({ ...prev, max_cr: parseFloat(e.target.value) }))}
-                            className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
-                        />
-                    </div>
-                </div>
+                <CrRangeSlider
+                    min={filters.min_cr}
+                    max={filters.max_cr}
+                    limitMin={options.min_cr_limit}
+                    limitMax={options.max_cr_limit}
+                    onChange={({ min, max }) => setFilters(prev => ({ ...prev, min_cr: min, max_cr: max }))}
+                />
             </div>
 
             {loading && players.length === 0 && (

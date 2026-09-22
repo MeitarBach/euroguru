@@ -93,3 +93,45 @@ body {
 .input-dark:focus {
   border-color: var(--primary);
 }
+/* Dual-thumb range (CrRangeSlider).
+   Two range inputs are stacked on one track so a cost range can be set from both
+   ends. Each input still spans the full width, so the upper one would swallow every
+   click and the lower thumb could never be grabbed - hence pointer-events off on the
+   input and back on for the thumb alone. The track is drawn by the component; these
+   inputs contribute nothing but their thumbs. */
+.range-dual input[type="range"] {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  margin: 0;
+  background: none;
+  pointer-events: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.range-dual input[type="range"]::-webkit-slider-thumb {
+  pointer-events: auto;
+  -webkit-appearance: none;
+  height: 14px;
+  width: 14px;
+  border-radius: 9999px;
+  background: var(--primary);
+  /* Ringed in the panel colour so two adjacent thumbs stay countable. */
+  border: 2px solid #0d0d0f;
+  cursor: pointer;
+}
+
+.range-dual input[type="range"]::-moz-range-thumb {
+  pointer-events: auto;
+  height: 14px;
+  width: 14px;
+  border: 2px solid #0d0d0f;
+  border-radius: 9999px;
+  background: var(--primary);
+  cursor: pointer;
+}
+
+.range-dual input[type="range"]::-moz-range-track {
+  background: none;
+}

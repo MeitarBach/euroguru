@@ -9,9 +9,14 @@ export default function Sidebar({ activeTab, setActiveTab }) {
     { id: 'recs', label: 'Recommendations', icon: TrendingUp },
     ];
 
+    // Opaque, and above the page, rather than the glass-panel it used to be. A 3%-white
+    // background is fine for a card sitting on the page, but not for fixed chrome that
+    // content can pass beneath: anything scrolled under the sidebar stayed visible
+    // through it. #0d0d0f is what that translucent panel already resolved to over the
+    // #050507 page, so this looks unchanged - it just no longer shows what is behind it.
     return (
-        <div className="w-64 h-screen fixed left-0 top-0 glass-panel border-r border-[#ffffff10] flex flex-col p-4"
-            style={{ width: '260px', borderRadius: '0' }}>
+        <div className="w-64 h-screen fixed left-0 top-0 z-30 border-r border-[#ffffff10] flex flex-col p-4 bg-[#0d0d0f]"
+            style={{ width: '260px' }}>
 
             {/* Brand */}
             <div className="flex items-center gap-3 mb-8 px-2 mt-2">
