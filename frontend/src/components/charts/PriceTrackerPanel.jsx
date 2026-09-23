@@ -205,7 +205,7 @@ export default function PriceTrackerPanel({ season, games = FULL_SEASON, onSelec
                 />
                 <button
                     onClick={followMovers}
-                    className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors ${!pinned
+                    className={`px-2.5 py-2 md:py-1.5 rounded-lg text-xs font-medium border transition-colors ${!pinned
                         ? 'bg-purple-600/20 text-purple-300 border-purple-500/40'
                         : 'bg-[#ffffff05] text-gray-500 border-[#ffffff10] hover:text-gray-300'}`}
                 >

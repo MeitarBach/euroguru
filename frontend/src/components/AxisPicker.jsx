@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { anchorFrom, anchoredPosition } from '../anchoredPanel';
 import { ChevronDown, Check } from 'lucide-react';
 
 /**
@@ -44,8 +45,7 @@ export default function AxisPicker({
             <label className="text-xs text-gray-500 uppercase tracking-wider font-semibold">{label}</label>
             <button
                 onClick={(e) => {
-                    const r = e.currentTarget.getBoundingClientRect();
-                    setAnchor({ x: r.left, y: r.bottom + 8 });
+                    setAnchor(anchorFrom(e.currentTarget));
                     setOpen(v => !v);
                 }}
                 className={`flex items-center justify-between gap-2 min-w-[170px] px-3 py-2 rounded-lg text-sm border
@@ -62,12 +62,8 @@ export default function AxisPicker({
             {open && anchor && createPortal(
                 <div
                     ref={panelRef}
-                    style={{
-                        position: 'fixed',
-                        left: Math.min(anchor.x, window.innerWidth - 300),
-                        top: anchor.y,
-                    }}
-                    className="z-[70] w-[280px] max-h-[60vh] overflow-y-auto rounded-xl
+                    style={anchoredPosition(anchor, 280)}
+                    className="z-[70] w-[min(280px,calc(100vw-16px))] max-h-[60vh] overflow-y-auto rounded-xl
                                bg-[#16161a] border border-white/10 shadow-2xl p-2"
                 >
                     {allowNone && (

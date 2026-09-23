@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { anchorFrom, anchoredPosition } from '../anchoredPanel';
 import { Columns3, Check } from 'lucide-react';
 
 /**
@@ -51,8 +52,7 @@ export default function ColumnPicker({
                     // Anchor the panel to the button in viewport coordinates. Rendered
                     // inline it was painted behind the stats table, which sits in its
                     // own stacking context.
-                    const r = e.currentTarget.getBoundingClientRect();
-                    setAnchor({ x: r.left, y: r.bottom + 8 });
+                    setAnchor(anchorFrom(e.currentTarget));
                     setOpen(v => !v);
                 }}
                 className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${open
@@ -67,12 +67,8 @@ export default function ColumnPicker({
             {open && anchor && createPortal(
                 <div
                     ref={panelRef}
-                    style={{
-                        position: 'fixed',
-                        left: Math.min(anchor.x, window.innerWidth - 340),
-                        top: anchor.y,
-                    }}
-                    className="z-[70] w-[320px] max-h-[70vh] overflow-y-auto rounded-xl
+                    style={anchoredPosition(anchor, 320)}
+                    className="z-[70] w-[min(320px,calc(100vw-16px))] max-h-[70vh] overflow-y-auto rounded-xl
                                bg-[#16161a] border border-white/10 shadow-2xl p-2"
                 >
                     <div className="flex items-center justify-between px-2 py-1.5">

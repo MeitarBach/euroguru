@@ -18,9 +18,15 @@ const SortIcon = ({ column, sortConfig }) => {
     );
 };
 
-const Th = ({ label, sortKey, align = 'left', sortConfig, onSort }) => (
+// See StatsView for the derivation: opaque tones matching what the layered translucent
+// classes already resolve to, so a sticky cell looks identical but nothing scrolls
+// through it.
+const STICKY_HEAD = 'sticky left-0 z-20 bg-[#19191b]';
+const STICKY_CELL = 'sticky left-0 z-10 bg-[#0d0d0f] group-hover:bg-[#141416]';
+
+const Th = ({ label, sortKey, align = 'left', sortConfig, onSort, sticky }) => (
     <th
-        className={`px-6 py-4 cursor-pointer hover:bg-[#ffffff05] transition-colors text-${align}`}
+        className={`px-3 md:px-6 py-4 cursor-pointer hover:bg-[#ffffff05] transition-colors text-${align} ${sticky ? STICKY_HEAD : ''}`}
         onClick={() => onSort(sortKey)}
     >
         <div className={`flex items-center gap-1 ${align === 'right' ? 'justify-end' : align === 'center' ? 'justify-center' : ''}`}>
@@ -190,17 +196,19 @@ export default function RecommendationsView() {
 
     return (
         <div className="space-y-6">
-            <header className="flex items-center justify-between">
+            {/* Stacks below sm: the title and this button cannot share a phone-width
+                row, and justify-between pushed the button past the viewport edge. */}
+            <header className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                    <h2 className="text-2xl font-bold flex items-center gap-2">
-                        <TrendingUp className="text-purple-400" />
+                    <h2 className="text-xl sm:text-2xl font-bold flex items-center gap-2">
+                        <TrendingUp className="text-purple-400 shrink-0" />
                         Smart Recommendations
                     </h2>
                     <p className="text-gray-400 text-sm">AI-powered player suggestions based on efficiency and consistency.</p>
                 </div>
                 <button
                     onClick={() => setShowAdvanced(!showAdvanced)}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${showAdvanced
+                    className={`flex items-center gap-2 shrink-0 px-4 py-2 rounded-lg text-sm font-medium transition-all ${showAdvanced
                         ? 'bg-purple-600 text-white shadow-lg shadow-purple-900/20'
                         : 'text-gray-400 hover:text-white hover:bg-[#ffffff05] border border-[#ffffff10]'
                         }`}
@@ -311,12 +319,15 @@ export default function RecommendationsView() {
                         <table className="w-full text-left text-sm">
                             <thead className="bg-[#ffffff05] text-gray-400 font-medium uppercase text-xs">
                                 <tr>
-                                    <th className="px-6 py-4">
+                                    {/* The medal is decorative on a phone: rows are already in
+                                        rank order and the top three carry a TOP PICK badge. Hiding it
+                                        frees ~80px and lets Player be the sticky column. */}
+                                    <th className="hidden md:table-cell px-6 py-4">
                                         <div className="flex items-center gap-1">
                                             Rank
                                         </div>
                                     </th>
-                                    <Th label="Player" sortKey="PlayerName" sortConfig={sortConfig} onSort={requestSort} />
+                                    <Th label="Player" sortKey="PlayerName" sortConfig={sortConfig} onSort={requestSort} sticky />
                                     <Th label="Position" sortKey="position" sortConfig={sortConfig} onSort={requestSort} />
                                     <Th label="Cost (CR)" sortKey="CR" align="right" sortConfig={sortConfig} onSort={requestSort} />
                                     {/* Not sortable: the cell is a chart, and the
@@ -335,10 +346,10 @@ export default function RecommendationsView() {
                                             <tr
                                                 key={player.PlayerName ?? idx}
                                                 onClick={() => openPlayer(player.PlayerName, filters.season)}
-                                                className={`hover:bg-[#ffffff03] transition-colors cursor-pointer ${isTopPick ? 'bg-gradient-to-r from-purple-500/5 to-transparent' : ''
+                                                className={`group hover:bg-[#ffffff03] transition-colors cursor-pointer ${isTopPick ? 'bg-gradient-to-r from-purple-500/5 to-transparent' : ''
                                                     }`}
                                             >
-                                                <td className="px-6 py-3">
+                                                <td className="hidden md:table-cell px-6 py-3">
                                                     <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${isTopPick
                                                         ? 'bg-gradient-to-br from-yellow-400 to-orange-500 text-black'
                                                         : 'bg-[#ffffff10] text-gray-400'
@@ -349,7 +360,7 @@ export default function RecommendationsView() {
                                                         {idx > 2 && (idx + 1)}
                                                     </div>
                                                 </td>
-                                                <td className="px-6 py-3 font-medium text-white">
+                                                <td className={`px-3 md:px-6 py-3 font-medium text-white whitespace-nowrap ${STICKY_CELL}`}>
                                                     {player.PlayerName}
                                                     {isTopPick && (
                                                         <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400 border border-purple-500/30">

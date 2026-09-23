@@ -55,7 +55,7 @@ export default function BarChartPanel({ data, categoryKey, valueKey, categoryLab
                     No players have data for both of these metrics in this season.
                 </div>
             ) : (
-                <div className="h-[420px]">
+                <div className="h-[280px] md:h-[420px]">
                     <ResponsiveContainer width="100%" height="100%">
                         <BarChart data={rows} margin={{ top: 10, right: 24, bottom: 40, left: 10 }}>
                             <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" vertical={false} />

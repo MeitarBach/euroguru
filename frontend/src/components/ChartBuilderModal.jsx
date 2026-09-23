@@ -48,11 +48,11 @@ export default function ChartBuilderModal({
 
     return (
         <div
-            className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-start justify-center overflow-y-auto p-6"
+            className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-start justify-center overflow-y-auto p-0 sm:p-6"
             onClick={onClose}
         >
             <div
-                className="glass-panel w-full max-w-4xl my-8 p-6 space-y-5"
+                className="glass-panel w-full max-w-4xl my-0 sm:my-8 p-4 sm:p-6 space-y-5 rounded-none sm:rounded-xl min-h-screen sm:min-h-0"
                 onClick={(e) => e.stopPropagation()}
             >
                 <div className="flex items-start justify-between">

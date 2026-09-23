@@ -26,7 +26,10 @@ body {
   background-color: var(--bg-app);
   color: var(--text-main);
   -webkit-font-smoothing: antialiased;
+  /* vh first as the fallback; dvh tracks mobile browser chrome showing and
+     hiding, where 100vh jumps and leaves a gap or overflows. */
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 /* Scrollbar */

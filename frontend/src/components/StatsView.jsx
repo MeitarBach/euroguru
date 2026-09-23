@@ -23,10 +23,19 @@ const SortIcon = ({ column, sortConfig }) => {
     );
 };
 
+// The colours the sticky player column paints itself, since a transparent cell would
+// let the scrolling ones show through. Each is what the layered translucent classes
+// already resolve to over the #050507 page, so nothing changes visually:
+//   header  glass-panel 3% + thead 5%  -> #19191b
+//   row     glass-panel 3%             -> #0d0d0f
+//   hover   glass-panel 3% + row 3%    -> #141416
+const STICKY_HEAD = 'sticky left-0 z-20 bg-[#19191b]';
+const STICKY_CELL = 'sticky left-0 z-10 bg-[#0d0d0f] group-hover:bg-[#141416]';
+
 // Header helper to handle click and mapping to correct data key
-const Th = ({ label, sortKey, align = 'left', sortConfig, onSort, info }) => (
+const Th = ({ label, sortKey, align = 'left', sortConfig, onSort, info, sticky }) => (
     <th
-        className={`px-4 py-4 cursor-pointer hover:bg-[#ffffff05] transition-colors text-${align} whitespace-nowrap`}
+        className={`px-2 md:px-4 py-4 cursor-pointer hover:bg-[#ffffff05] transition-colors text-${align} whitespace-nowrap ${sticky ? STICKY_HEAD : ''}`}
         onClick={() => onSort(sortKey)}
     >
         <div className={`flex items-center gap-1.5 ${align === 'right' ? 'justify-end' : align === 'center' ? 'justify-center' : ''}`}>
@@ -328,6 +337,7 @@ export default function StatsView() {
                                             info={columnInfo(col, scoreMetric)}
                                             sortConfig={sortConfig}
                                             onSort={requestSort}
+                                            sticky={col.fmt === 'player'}
                                         />
                                     ))}
                                 </tr>
@@ -337,13 +347,15 @@ export default function StatsView() {
                                         <tr
                                             key={`${player.PlayerID ?? player.PlayerName ?? 'row'}-${idx}`}
                                             onClick={() => openPlayer(player.PlayerName, filters.season)}
-                                            className="hover:bg-[#ffffff03] transition-colors cursor-pointer"
+                                            // `group` so the sticky cell can follow the row's hover; it paints
+                                            // its own opaque background and would otherwise ignore it.
+                                            className="group hover:bg-[#ffffff03] transition-colors cursor-pointer"
                                         >
                                             {visibleColumns.map(col => {
                                                 const value = player[columnKey(col, true)];
                                                 if (col.fmt === 'player') {
                                                     return (
-                                                        <td key={col.id} className="px-4 py-3 font-medium text-white whitespace-nowrap">
+                                                        <td key={col.id} className={`px-2 md:px-4 py-3 font-medium text-white whitespace-nowrap ${STICKY_CELL}`}>
                                                             {player.PlayerName}
                                                             {player.InjuryStatus && (
                                                                 // Abbreviated and tone-matched via the shared helper: the raw
@@ -363,7 +375,7 @@ export default function StatsView() {
                                                 const toneClass = col.strong ? 'font-bold text-white' : col.id === 'CR' ? 'text-purple-300' : 'text-gray-400';
                                                 const mono = col.fmt !== 'text' ? 'font-mono' : '';
                                                 return (
-                                                    <td key={col.id} className={`px-4 py-3 ${alignClass} ${mono} ${toneClass}`}>
+                                                    <td key={col.id} className={`px-2 md:px-4 py-3 ${alignClass} ${mono} ${toneClass}`}>
                                                         {formatCell(value, col.fmt)}
                                                     </td>
                                                 );

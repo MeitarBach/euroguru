@@ -214,7 +214,7 @@ const InjuryPanel = ({ injuries, onOpen }) => {
             {injuries.length > INJURY_PREVIEW && (
                 <button
                     onClick={() => setExpanded(v => !v)}
-                    className="mt-3 w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg
+                    className="mt-3 w-full flex items-center justify-center gap-1.5 py-2.5 md:py-1.5 rounded-lg
                                text-xs font-medium text-gray-500 hover:text-gray-300
                                hover:bg-[#ffffff05] transition-colors"
                 >
@@ -263,7 +263,7 @@ export default function DashboardView() {
                 <p className="text-gray-400 text-sm">Smart insights and critical updates.</p>
             </header>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 md:gap-6">
                 <WidgetColumn
                     title="Who's Hot"
                     subtitle="Based on last 3 games"

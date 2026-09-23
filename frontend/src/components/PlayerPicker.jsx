@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
+import { anchorFrom, anchoredPosition } from '../anchoredPanel';
 import { UserPlus, Check, Search } from 'lucide-react';
 
 /**
@@ -59,11 +60,10 @@ export default function PlayerPicker({ players, selected, onChange, max }) {
         <div className="relative" ref={ref}>
             <button
                 onClick={(e) => {
-                    const r = e.currentTarget.getBoundingClientRect();
-                    setAnchor({ x: r.left, y: r.bottom + 8 });
+                    setAnchor(anchorFrom(e.currentTarget));
                     setOpen(v => !v);
                 }}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${open
+                className={`flex items-center gap-2 px-3 py-2 md:py-1.5 rounded-lg text-xs font-medium border transition-colors ${open
                     ? 'bg-purple-600/20 text-purple-300 border-purple-500/40'
                     : 'bg-[#ffffff05] text-gray-300 border-[#ffffff10] hover:text-white'}`}
             >
@@ -75,12 +75,8 @@ export default function PlayerPicker({ players, selected, onChange, max }) {
             {open && anchor && createPortal(
                 <div
                     ref={panelRef}
-                    style={{
-                        position: 'fixed',
-                        left: Math.min(anchor.x, window.innerWidth - 340),
-                        top: anchor.y,
-                    }}
-                    className="z-[70] w-[320px] rounded-xl bg-[#16161a] border border-white/10 shadow-2xl p-2"
+                    style={anchoredPosition(anchor, 320)}
+                    className="z-[70] w-[min(320px,calc(100vw-16px))] rounded-xl bg-[#16161a] border border-white/10 shadow-2xl p-2"
                 >
                     <div className="flex items-center gap-2 px-2 py-1.5 mb-1 rounded-lg bg-[#ffffff05]">
                         <Search size={13} className="text-gray-500 shrink-0" />

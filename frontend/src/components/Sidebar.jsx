@@ -1,21 +1,18 @@
 import React from 'react';
-import { LayoutDashboard, Users, TrendingUp, ScatterChart, LogOut } from 'lucide-react';
+import { LogOut } from 'lucide-react';
+import { NAV_ITEMS } from '../navigation';
 
 export default function Sidebar({ activeTab, setActiveTab }) {
-    const menu = [
-        { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-        { id: 'stats', label: 'Player Stats', icon: Users },
-        { id: 'viz', label: 'Court Vision', icon: ScatterChart },
-    { id: 'recs', label: 'Recommendations', icon: TrendingUp },
-    ];
-
     // Opaque, and above the page, rather than the glass-panel it used to be. A 3%-white
     // background is fine for a card sitting on the page, but not for fixed chrome that
     // content can pass beneath: anything scrolled under the sidebar stayed visible
     // through it. #0d0d0f is what that translucent panel already resolved to over the
     // #050507 page, so this looks unchanged - it just no longer shows what is behind it.
+    //
+    // Hidden below md, where 260px would be two thirds of a phone screen; MobileNav
+    // takes over there.
     return (
-        <div className="w-64 h-screen fixed left-0 top-0 z-30 border-r border-[#ffffff10] flex flex-col p-4 bg-[#0d0d0f]"
+        <div className="w-64 h-screen fixed left-0 top-0 z-30 border-r border-[#ffffff10] hidden md:flex flex-col p-4 bg-[#0d0d0f]"
             style={{ width: '260px' }}>
 
             {/* Brand */}
@@ -36,7 +33,7 @@ export default function Sidebar({ activeTab, setActiveTab }) {
 
             {/* Menu */}
             <nav className="flex-1 space-y-1">
-                {menu.map((item) => {
+                {NAV_ITEMS.map((item) => {
                     const Icon = item.icon;
                     const isActive = activeTab === item.id;
                     return (
@@ -65,7 +62,16 @@ export default function Sidebar({ activeTab, setActiveTab }) {
                         <div className="text-sm font-medium truncate">Meitar Bach</div>
                         <div className="text-xs text-gray-500">Pro Plan</div>
                     </div>
-                    <LogOut size={16} className="text-gray-500 cursor-pointer hover:text-white" />
+                    {/* Was a bare 16px <svg> with a cursor style - not focusable, not
+                        announced, and far below a usable tap target. The icon still
+                        looks the same; the padding is the hit area. */}
+                    <button
+                        type="button"
+                        aria-label="Sign out"
+                        className="p-2 -m-1 rounded-lg text-gray-500 hover:text-white hover:bg-[#ffffff08] transition-colors"
+                    >
+                        <LogOut size={16} />
+                    </button>
                 </div>
             </div>
         </div>

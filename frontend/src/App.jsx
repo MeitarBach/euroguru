@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import Sidebar from './components/Sidebar';
+import MobileNav from './components/MobileNav';
+import MobileHeader from './components/MobileHeader';
 import StatsView from './components/StatsView';
 import DashboardView from './components/DashboardView';
 import RecommendationsView from './components/RecommendationsView';
@@ -20,16 +22,26 @@ function App() {
             refuses to shrink below its content: a wide stats table stretched this
             element past the viewport, the whole page scrolled sideways, and the rows
             slid underneath the fixed sidebar. With it, the table's own overflow-x-auto
-            scrolls internally and the page never scrolls horizontally at all. */}
-        <main className="flex-1 min-w-0 ml-[260px] p-8">
-          {activeTab === 'dashboard' && <DashboardView />}
+            scrolls internally and the page never scrolls horizontally at all.
 
-          {activeTab === 'stats' && <StatsView />}
+            The margin matches the sidebar and disappears with it below md, where the
+            content takes the full width. pb-24 is the bottom tab bar's clearance - the
+            last row of a table would otherwise sit under it. */}
+        <main className="flex-1 min-w-0 ml-0 md:ml-[260px] pb-24 md:pb-8">
+          <MobileHeader />
 
-          {activeTab === 'viz' && <CourtVisionView />}
+          <div className="p-4 md:p-8">
+            {activeTab === 'dashboard' && <DashboardView />}
 
-          {activeTab === 'recs' && <RecommendationsView />}
+            {activeTab === 'stats' && <StatsView />}
+
+            {activeTab === 'viz' && <CourtVisionView />}
+
+            {activeTab === 'recs' && <RecommendationsView />}
+          </div>
         </main>
+
+        <MobileNav activeTab={activeTab} setActiveTab={setActiveTab} />
       </div>
     </PlayerDetailProvider>
   );

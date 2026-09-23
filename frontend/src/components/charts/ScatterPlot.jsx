@@ -166,7 +166,7 @@ export default function ScatterPlot({
 
     return (
         <Panel title={title} legend={legendPayload}>
-            <div className="h-[420px]">
+            <div className="h-[280px] md:h-[420px]">
                 <ResponsiveContainer width="100%" height="100%">
                     <ScatterChart margin={{ top: 10, right: 24, bottom: 30, left: 10 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" />
