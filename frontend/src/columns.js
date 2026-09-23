@@ -96,6 +96,30 @@ export const columnLabel = (col, aggregated, metric) => {
 export const columnInfo = (col, metric) =>
     (typeof col.info === 'function' ? col.info(metric) : col.info);
 
+/**
+ * "Timothe Luwawu-cabarrot" -> "T. Luwawu-cabarrot".
+ *
+ * Names run to 23 characters here and the player column is `whitespace-nowrap`, so on
+ * a phone one name can claim most of the row. The surname is what identifies a player
+ * at a glance, so the given name is what gives way.
+ *
+ * Left alone when there is nothing to shorten - a single-word name, or one the source
+ * already abbreviated. The CR feed ships names in exactly this form ("S. Vezenkov"),
+ * so for the current season this is the format the data already uses.
+ */
+export const shortName = (name) => {
+    const text = String(name ?? '').trim();
+    const space = text.indexOf(' ');
+    if (space < 1) return text;
+
+    const first = text.slice(0, space);
+    // Already an initial, with or without the dot.
+    if (first.length <= 2 && first.endsWith('.')) return text;
+    if (first.length === 1) return text;
+
+    return `${first[0]}. ${text.slice(space + 1)}`;
+};
+
 // Formats a single cell. Uses ?? rather than || throughout: a legitimate 0 - a
 // plus-minus of exactly zero, a scoreless night - must render as 0, not as a dash.
 // The API sends null for "no data", and empty string never appears now that every

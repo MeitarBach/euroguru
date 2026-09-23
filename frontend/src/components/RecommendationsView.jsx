@@ -7,6 +7,8 @@ import { useOpenPlayer } from '../hooks/playerDetailContext';
 import usePriceTrend from '../hooks/usePriceTrend';
 import PriceTrend from './charts/PriceTrend';
 import CrRangeSlider from './CrRangeSlider';
+import { shortName } from '../columns';
+import { useIsNarrow } from '../hooks/useMediaQuery';
 import GamesWindowSelect from './GamesWindowSelect';
 
 const SortIcon = ({ column, sortConfig }) => {
@@ -76,6 +78,8 @@ export default function RecommendationsView() {
 
     const { trendFor } = usePriceTrend(filters.season);
     const openPlayer = useOpenPlayer();
+    // Abbreviates the given name on a phone; see StatsView.
+    const narrow = useIsNarrow();
 
     // Which metric the backend's Score column holds for the selected season.
     const [scoreMetric, setScoreMetric] = useState('PIR');
@@ -316,7 +320,7 @@ export default function RecommendationsView() {
             {!loading && (
                 <div className="glass-panel overflow-hidden relative min-h-[400px]">
                     <div className="overflow-x-auto">
-                        <table className="w-full text-left text-sm">
+                        <table className="w-full text-left text-xs md:text-sm">
                             <thead className="bg-[#ffffff05] text-gray-400 font-medium uppercase text-xs">
                                 <tr>
                                     {/* The medal is decorative on a phone: rows are already in
@@ -361,7 +365,7 @@ export default function RecommendationsView() {
                                                     </div>
                                                 </td>
                                                 <td className={`px-3 md:px-6 py-3 font-medium text-white whitespace-nowrap ${STICKY_CELL}`}>
-                                                    {player.PlayerName}
+                                                    {narrow ? shortName(player.PlayerName) : player.PlayerName}
                                                     {isTopPick && (
                                                         <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400 border border-purple-500/30">
                                                             TOP PICK

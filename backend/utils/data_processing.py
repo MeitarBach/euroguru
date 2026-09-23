@@ -835,6 +835,8 @@ def calculate_pir_stats(df, last_x_games):
     # See calculate_player_averages: constant within a PlayerName group.
     if "PlayerKey" in df_sorted.columns:
         base_firsts["PlayerKey"] = "first"
+    if "TeamCode" in df_sorted.columns:
+        base_firsts["TeamCode"] = "first"
     if "InjuryStatus" in df_sorted.columns:
         base_firsts["InjuryStatus"] = "first"
     if "Injury" in df_sorted.columns:
@@ -955,6 +957,12 @@ def calculate_player_averages(df, last_x_games):
     # from it - so "first" is exact, not a sample.
     if "PlayerKey" in df_sorted.columns:
         base_firsts["PlayerKey"] = "first"
+    # The three-letter code from the schedule join. Team names run to 34 characters
+    # ("CRVENA ZVEZDA MERIDIANBET BELGRADE"), which a phone cannot spare; the client
+    # shows the code there instead. "first" is safe for the same reason as above,
+    # except for a mid-season transfer, where the most recent team is the useful one.
+    if "TeamCode" in df_sorted.columns:
+        base_firsts["TeamCode"] = "first"
     if "InjuryStatus" in df_sorted.columns:
         base_firsts["InjuryStatus"] = "first"
 

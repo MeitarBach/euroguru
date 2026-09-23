@@ -10,9 +10,10 @@ import CrRangeSlider from './CrRangeSlider';
 import GamesWindowSelect from './GamesWindowSelect';
 import {
     COLUMNS, COLUMN_CATEGORIES, DEFAULT_COLUMN_IDS,
-    columnKey, columnLabel, columnInfo, formatCell,
+    columnKey, columnLabel, columnInfo, formatCell, shortName,
     loadStoredColumns, storeColumns,
 } from '../columns';
+import { useIsNarrow } from '../hooks/useMediaQuery';
 
 const SortIcon = ({ column, sortConfig }) => {
     if (sortConfig.key !== column) return <div className="w-4 h-4 inline-block ml-1 opacity-20">↕</div>;
@@ -76,6 +77,9 @@ export default function StatsView() {
     const [selectedColumns, setSelectedColumns] = useState(loadStoredColumns);
     // The modal is shared app-wide now, so this view only needs the opener.
     const openPlayer = useOpenPlayer();
+    // Content, not styling: on a phone the given name is abbreviated and the team
+    // shows its three-letter code. CSS cannot rewrite text, so this needs JS.
+    const narrow = useIsNarrow();
 
     const [filtersReady, setFiltersReady] = useState(false);
 
@@ -325,7 +329,7 @@ export default function StatsView() {
             {(players.length > 0 || !loading) && (
                 <div className={`glass-panel overflow-hidden relative min-h-[400px] transition-opacity ${loading ? 'opacity-60' : ''}`}>
                     <div className="overflow-x-auto">
-                        <table className="w-full text-left text-sm">
+                        <table className="w-full text-left text-xs md:text-sm">
                             <thead className="bg-[#ffffff05] text-gray-400 font-medium uppercase text-xs">
                                 <tr>
                                     {visibleColumns.map(col => (
@@ -356,7 +360,7 @@ export default function StatsView() {
                                                 if (col.fmt === 'player') {
                                                     return (
                                                         <td key={col.id} className={`px-2 md:px-4 py-3 font-medium text-white whitespace-nowrap ${STICKY_CELL}`}>
-                                                            {player.PlayerName}
+                                                            {narrow ? shortName(player.PlayerName) : player.PlayerName}
                                                             {player.InjuryStatus && (
                                                                 // Abbreviated and tone-matched via the shared helper: the raw
                                                                 // feed value for a game-time decision is the full phrase, which
@@ -375,8 +379,15 @@ export default function StatsView() {
                                                 const toneClass = col.strong ? 'font-bold text-white' : col.id === 'CR' ? 'text-purple-300' : 'text-gray-400';
                                                 const mono = col.fmt !== 'text' ? 'font-mono' : '';
                                                 return (
-                                                    <td key={col.id} className={`px-2 md:px-4 py-3 ${alignClass} ${mono} ${toneClass}`}>
-                                                        {formatCell(value, col.fmt)}
+                                                    <td
+                                                        key={col.id}
+                                                        className={`px-2 md:px-4 py-3 ${alignClass} ${mono} ${toneClass}`}
+                                                        title={col.id === 'Team' ? player.Team : undefined}
+                                                    >
+                                                        {/* Team names reach 34 characters; the code is what fits. */}
+                                                        {col.id === 'Team' && narrow
+                                                            ? (player.TeamCode ?? formatCell(value, col.fmt))
+                                                            : formatCell(value, col.fmt)}
                                                     </td>
                                                 );
                                             })}
