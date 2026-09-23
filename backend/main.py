@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional
 import pandas as pd
@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from utils.data_processing import load_and_merge_data, filter_by_cr_and_position, score_metric
 from utils.recommendations import recommend_players_v2
 from utils.cr_history import cr_history_payload
+from utils.auth import optional_user
 
 app = FastAPI(title="EuroGuru API")
 
@@ -28,6 +29,11 @@ app.add_middleware(
 # a stale one while it refreshes in the background.
 EDGE_TTL_SECONDS = int(os.environ.get("EDGE_TTL_SECONDS", 300))
 EDGE_STALE_SECONDS = int(os.environ.get("EDGE_STALE_SECONDS", 86_400))
+
+# Routes that answer "who is asking", rather than answering from the data files. These
+# are never storable, with or without a token. Add a route here the moment its body
+# starts depending on the caller - a paid-tier response, say.
+PRIVATE_PATHS = {"/api/me"}
 
 
 @app.middleware("http")
@@ -52,6 +58,14 @@ async def edge_cache(request, call_next):
     """
     response = await call_next(request)
 
+    # Anything whose answer depends on the caller rather than on the URL. Storing one
+    # of these anywhere is a bug in both directions: a signed-in answer handed to a
+    # stranger, or - the one that actually bit - an anonymous answer replayed to
+    # someone who has since signed in, for the full stale-while-revalidate window.
+    if request.url.path in PRIVATE_PATHS or "authorization" in request.headers:
+        response.headers["Cache-Control"] = "private, no-store"
+        return response
+
     cacheable = (
         request.method == "GET"
         and response.status_code == 200
@@ -63,6 +77,12 @@ async def edge_cache(request, call_next):
             f"public, max-age=0, s-maxage={EDGE_TTL_SECONDS}, "
             f"stale-while-revalidate={EDGE_STALE_SECONDS}"
         )
+        # The header above is only half of it. A cache keys on the URL, so without
+        # Vary the anonymous copy of /api/anything is a perfectly valid hit for a
+        # request that arrives carrying a token - which is exactly how a signed-in
+        # user gets told they are signed out. Vary makes the presence of the header
+        # part of the key, so the two never collide.
+        response.headers["Vary"] = "Authorization"
     return response
 
 # --- Global Data Loader ---
@@ -100,6 +120,30 @@ def _json_safe(df):
 @app.get("/")
 def read_root():
     return {"message": "Welcome to EuroGuru API"}
+
+
+@app.get("/api/me")
+async def get_me(user=Depends(optional_user)):
+    """
+    Who the caller is, as far as this API can tell.
+
+    The only route that exercises the whole verification chain end to end - browser
+    session, Bearer header, Vercel rewrite, JWKS lookup, signature check - so it is
+    worth keeping around past the first verification as the place to look when sign-in
+    "works" in the UI but the API disagrees.
+
+    Answers 200 either way. Anonymous is a valid answer here, not an error.
+    """
+    if user is None:
+        return {"authenticated": False}
+
+    return {
+        "authenticated": True,
+        "id": user.get("sub"),
+        "email": user.get("email"),
+        # 'google', 'email', and so on - handy for telling the two sign-in paths apart.
+        "provider": (user.get("app_metadata") or {}).get("provider"),
+    }
 
 @app.get("/api/filters")
 def get_filters(season: str = '2025'):

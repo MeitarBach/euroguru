@@ -7,3 +7,6 @@ pydantic>=2.6.1
 python-multipart
 python-dotenv
 requests
+# Verifies Supabase access tokens against the project's public JWKS. The [crypto]
+# extra is what supplies ES256, which is how new Supabase projects sign.
+PyJWT[crypto]>=2.8.0

@@ -52,12 +52,22 @@ body {
 }
 
 /* Utilities */
-.glass-panel {
-  background: var(--bg-card);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid var(--border-card);
-  border-radius: 12px;
+
+/* In the components layer so Tailwind utilities beat it.
+   Written bare, this sat after @tailwind utilities at equal specificity and won every
+   tie - which meant `glass-panel rounded-none` still had 12px corners. Harmless on a
+   card, wrong on the three full-bleed modal sheets (the player detail, the chart
+   builder and sign-in), where a phone got rounded corners cut out of a panel running
+   edge to edge. Those are the only places that pair this class with a rounded-*
+   utility, and all three want the utility to win. */
+@layer components {
+  .glass-panel {
+    background: var(--bg-card);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--border-card);
+    border-radius: 12px;
+  }
 }
 
 .text-gradient {

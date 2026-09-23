@@ -7,13 +7,19 @@ import DashboardView from './components/DashboardView';
 import RecommendationsView from './components/RecommendationsView';
 import CourtVisionView from './components/CourtVisionView';
 import { PlayerDetailProvider } from './hooks/usePlayerDetail';
+import { AuthProvider } from './hooks/useAuth';
 
 function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
 
   return (
-    // The provider wraps the whole shell, not each view: every tab can open a player,
-    // and a view unmounting on a tab switch must not take the modal with it.
+    // AuthProvider is outermost because the sidebar and the header both read the
+    // session, and it is not a gate: every tab below renders signed out, which is what
+    // keeps the free half of the app free. Signing in will unlock the paid parts
+    // later; it is not the price of entry.
+    <AuthProvider>
+    {/* The provider wraps the whole shell, not each view: every tab can open a player,
+        and a view unmounting on a tab switch must not take the modal with it. */}
     <PlayerDetailProvider>
       <div className="min-h-screen bg-[#050507] text-white flex">
         <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
@@ -44,6 +50,7 @@ function App() {
         <MobileNav activeTab={activeTab} setActiveTab={setActiveTab} />
       </div>
     </PlayerDetailProvider>
+    </AuthProvider>
   );
 }
 

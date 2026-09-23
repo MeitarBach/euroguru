@@ -1,6 +1,7 @@
 import React from 'react';
-import { LogOut } from 'lucide-react';
+import { LogOut, LogIn } from 'lucide-react';
 import { NAV_ITEMS } from '../navigation';
+import { useAuth, initialsFor } from '../hooks/authContext';
 
 export default function Sidebar({ activeTab, setActiveTab }) {
     // Opaque, and above the page, rather than the glass-panel it used to be. A 3%-white
@@ -53,27 +54,62 @@ export default function Sidebar({ activeTab, setActiveTab }) {
             </nav>
 
             {/* Footer */}
-            <div className="pt-4 border-t border-[#ffffff10]">
+            <AccountCard />
+        </div>
+    );
+}
+
+/**
+ * Who you are, or an invitation to say so.
+ *
+ * This card showed a hardcoded name and a Sign out button that did nothing until
+ * Supabase landed. Hidden entirely when the build has no auth configured, rather than
+ * offering a button that cannot work.
+ */
+function AccountCard() {
+    const { user, available, openAuth, signOut } = useAuth();
+
+    if (!available) return null;
+
+    return (
+        <div className="pt-4 border-t border-[#ffffff10]">
+            {user ? (
                 <div className="flex items-center gap-3 px-3 py-3 rounded-lg bg-[#00000040]">
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-pink-500 to-purple-600 flex items-center justify-center text-xs font-bold">
-                        MB
+                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-pink-500 to-purple-600 flex items-center justify-center text-xs font-bold shrink-0">
+                        {initialsFor(user)}
                     </div>
+                    {/* min-w-0 lets truncate actually bite - a long email would other-
+                        wise push the sign-out button off the edge of the sidebar. */}
                     <div className="flex-1 min-w-0">
-                        <div className="text-sm font-medium truncate">Meitar Bach</div>
-                        <div className="text-xs text-gray-500">Pro Plan</div>
+                        <div className="text-sm font-medium truncate" title={user.email}>
+                            {user.email}
+                        </div>
+                        <div className="text-xs text-gray-500">Signed in</div>
                     </div>
                     {/* Was a bare 16px <svg> with a cursor style - not focusable, not
                         announced, and far below a usable tap target. The icon still
                         looks the same; the padding is the hit area. */}
                     <button
                         type="button"
+                        onClick={signOut}
                         aria-label="Sign out"
                         className="p-2 -m-1 rounded-lg text-gray-500 hover:text-white hover:bg-[#ffffff08] transition-colors"
                     >
                         <LogOut size={16} />
                     </button>
                 </div>
-            </div>
+            ) : (
+                <button
+                    type="button"
+                    onClick={openAuth}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg
+                               bg-[#ffffff08] border border-[#ffffff10] text-sm font-medium
+                               text-gray-300 hover:text-white hover:bg-[#ffffff12] transition-colors"
+                >
+                    <LogIn size={16} />
+                    Sign in
+                </button>
+            )}
         </div>
     );
 }
