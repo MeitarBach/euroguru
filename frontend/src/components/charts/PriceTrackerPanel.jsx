@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { fetchCrHistory } from '../../services/api';
 import { loadStored, storeValue } from '../../columns';
+import { FULL_SEASON, applyWindow } from '../../priceWindow';
 import PlayerPicker from '../PlayerPicker';
 import PriceHistoryChart from './PriceHistoryChart';
 import { colorForIndex } from './palette';
@@ -8,62 +9,12 @@ import { colorForIndex } from './palette';
 const SELECTION_KEY = 'euroguru.courtVision.priceTracker';
 const MAX_LINES = 10;
 const DEFAULT_PER_SIDE = 3;
-const FULL_SEASON = 100;
-
-/**
- * Narrow every series to the most recent `games` price updates.
- *
- * N+1 points, not N: the price going *into* the stretch is what the following ones
- * are a change from, so "Last game" means the most recent move rather than a single
- * point with nothing to compare it to.
- *
- * Rounds are used when the snapshots carry them, which is only those written after
- * the fetcher started stamping Round. Everything before falls back to snapshot dates
- * — the honest unit for that data, since nothing recorded which round it belonged to.
- * A null-round point is treated as predating round 1, so it appears only when the
- * window reaches back that far.
- */
-const applyWindow = (players, games) => {
-    if (!players.length || games >= FULL_SEASON) return players;
-
-    const rounds = players
-        .flatMap(p => p.series.map(s => s.round))
-        .filter(r => r !== null && r !== undefined);
-
-    let keep;
-    if (rounds.length) {
-        const cutoff = Math.max(...rounds) - games;
-        keep = (point) => (point.round === null || point.round === undefined
-            ? cutoff <= 0
-            : point.round >= cutoff);
-    } else {
-        // Distinct dates across all players, so every line shares one x range rather
-        // than each player getting their own last-N.
-        const dates = [...new Set(players.flatMap(p => p.series.map(s => s.date)))].sort();
-        const window = new Set(dates.slice(-(games + 1)));
-        keep = (point) => window.has(point.date);
-    }
-
-    return players
-        .map(player => {
-            const series = player.series.filter(keep);
-            if (!series.length) return null;
-            const first = series[0].cr;
-            const last = series[series.length - 1].cr;
-            // Recomputed, not inherited: "who moved most" over three games is a
-            // different question from over a season, and the legend has to agree
-            // with the lines it is labelling.
-            return { ...player, series, first, last, change: Math.round((last - first) * 10) / 10 };
-        })
-        .filter(Boolean)
-        .sort((a, b) => b.change - a.change);
-};
 
 /**
  * Default to the extremes: the biggest risers and the biggest fallers.
  *
  * Opening on the top of the price list would mostly show flat lines for players who
- * were expensive all along. The movement is the story — who the market caught up with,
+ * were expensive all along. The movement is the story - who the market caught up with,
  * and who got cheap enough to be worth a look.
  */
 const defaultSelection = (players) => {
@@ -72,7 +23,7 @@ const defaultSelection = (players) => {
     // Pre-season, every price is the opening one and nothing has moved yet.
     if (!moved.length) return players.slice(0, DEFAULT_PER_SIDE);
 
-    // Sorted by change descending from the API, so the ends are the extremes.
+    // applyWindow returns them sorted by change descending, so the ends are the extremes.
     const risers = moved.slice(0, DEFAULT_PER_SIDE);
     const fallers = moved.slice(-DEFAULT_PER_SIDE).reverse();
     return [...new Set([...risers, ...fallers])];

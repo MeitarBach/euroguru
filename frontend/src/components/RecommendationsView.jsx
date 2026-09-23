@@ -89,7 +89,9 @@ export default function RecommendationsView() {
         max_cr_limit: 35
     });
 
-    const { trendFor } = usePriceTrend(filters.season);
+    // Windowed to the same games selector the ranking uses, so the sparkline in a
+    // row covers the stretch its numbers were computed over.
+    const { trendFor } = usePriceTrend(filters.season, filters.last_x_games);
     const openPlayer = useOpenPlayer();
     // Abbreviates the given name on a phone; see StatsView.
     const narrow = useIsNarrow();

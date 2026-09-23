@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { fetchCrHistory } from '../services/api';
+import { FULL_SEASON, applyWindow } from '../priceWindow';
 
 /**
  * Look a player's CR history up from any card.
@@ -11,8 +12,13 @@ import { fetchCrHistory } from '../services/api';
  * Returns { trendFor, ready }. `trendFor(player)` takes any object carrying a
  * PlayerKey (every player record the API returns does) and returns that player's
  * history record, or null.
+ *
+ * `games` narrows each series to the most recent price updates, so a sparkline sitting
+ * next to figures from the last five games describes the same stretch rather than the
+ * whole season. It defaults to the full season, which is what a surface with no games
+ * selector of its own - the dashboard, the player modal - should keep showing.
  */
-export default function usePriceTrend(season) {
+export default function usePriceTrend(season, games = FULL_SEASON) {
     const [players, setPlayers] = useState([]);
     const [loadedSeason, setLoadedSeason] = useState(null);
 
@@ -26,19 +32,23 @@ export default function usePriceTrend(season) {
         return () => { alive = false; };
     }, [season]);
 
+    // Windowed before the lookup map is built, so first/last/change on a returned
+    // record describe the selected stretch and not the season.
+    const windowed = useMemo(() => applyWindow(players, games), [players, games]);
+
     // nameKey is the backend's _name_key of the player's name, and the API now stamps
     // the same value onto every player row as PlayerKey, so the two join exactly.
     // Matching on the display name does not work - the stats and the price snapshots
     // capitalise names differently ("Mckinley Wright iv" vs "Mckinley Wright Iv").
     const byKey = useMemo(() => {
         const map = new Map();
-        for (const player of players) {
+        for (const player of windowed) {
             const existing = map.get(player.nameKey);
             if (existing) existing.push(player);
             else map.set(player.nameKey, [player]);
         }
         return map;
-    }, [players]);
+    }, [windowed]);
 
     const trendFor = useCallback((player) => {
         const key = player?.PlayerKey;
