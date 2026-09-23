@@ -256,8 +256,24 @@ def get_recommendations(params: RecommendationParams):
     
     if recs is None or recs.empty:
         return []
-        
-    return recs.head(20).fillna("").to_dict(orient="records")
+
+    recs = recs.head(20)
+
+    # Attach the same per-player aggregates the stats table shows, so the column
+    # picker on this tab can offer minutes, TS%, usage and the rest instead of only
+    # the four ranking figures recommend_players_v2 computes. Averaged over the same
+    # games window the ranking used, so a row's stats and its score describe one
+    # stretch of basketball rather than two.
+    from utils.data_processing import calculate_player_averages
+
+    averages = calculate_player_averages(filtered_df, params.last_x_games)
+    if not averages.empty:
+        # Both frames carry CR and position; keep one copy rather than let the merge
+        # produce _x/_y pairs the client would have to know about.
+        overlap = [c for c in recs.columns if c in averages.columns and c != "PlayerName"]
+        recs = recs.drop(columns=overlap).merge(averages, on="PlayerName", how="left")
+
+    return recs.fillna("").to_dict(orient="records")
 
 @app.get("/api/dashboard")
 def get_dashboard_data(season: str = '2025'):

@@ -7,7 +7,13 @@ import { useOpenPlayer } from '../hooks/playerDetailContext';
 import usePriceTrend from '../hooks/usePriceTrend';
 import PriceTrend from './charts/PriceTrend';
 import CrRangeSlider from './CrRangeSlider';
-import { shortName } from '../columns';
+import ColumnPicker from './ColumnPicker';
+import InfoTip from './InfoTip';
+import { shortName, columnKey, columnLabel, columnInfo, formatCell } from '../columns';
+import {
+    REC_COLUMNS, REC_COLUMN_CATEGORIES, REC_DEFAULT_IDS,
+    loadRecColumns, storeRecColumns,
+} from '../recommendationColumns';
 import { useIsNarrow } from '../hooks/useMediaQuery';
 import GamesWindowSelect from './GamesWindowSelect';
 
@@ -23,16 +29,23 @@ const SortIcon = ({ column, sortConfig }) => {
 // See StatsView for the derivation: opaque tones matching what the layered translucent
 // classes already resolve to, so a sticky cell looks identical but nothing scrolls
 // through it.
+// ColumnPicker greys out columns a season has no data for. Every field here
+// arrives from the same response, so nothing is ever unavailable.
+const ALL_AVAILABLE = { has: () => true };
+
 const STICKY_HEAD = 'sticky left-0 z-20 bg-[#19191b]';
 const STICKY_CELL = 'sticky left-0 z-10 bg-[#0d0d0f] group-hover:bg-[#141416]';
 
-const Th = ({ label, sortKey, align = 'left', sortConfig, onSort, sticky }) => (
+const Th = ({ label, sortKey, align = 'left', sortConfig, onSort, sticky, info, sortable = true }) => (
     <th
-        className={`px-3 md:px-6 py-4 cursor-pointer hover:bg-[#ffffff05] transition-colors text-${align} ${sticky ? STICKY_HEAD : ''}`}
-        onClick={() => onSort(sortKey)}
+        className={`px-3 md:px-6 py-4 transition-colors text-${align} whitespace-nowrap
+                    ${sortable ? 'cursor-pointer hover:bg-[#ffffff05]' : ''} ${sticky ? STICKY_HEAD : ''}`}
+        onClick={sortable ? () => onSort(sortKey) : undefined}
     >
-        <div className={`flex items-center gap-1 ${align === 'right' ? 'justify-end' : align === 'center' ? 'justify-center' : ''}`}>
-            {label} <SortIcon column={sortKey} sortConfig={sortConfig} />
+        <div className={`flex items-center gap-1.5 ${align === 'right' ? 'justify-end' : align === 'center' ? 'justify-center' : ''}`}>
+            {label}
+            {info && <InfoTip text={info} />}
+            {sortable && <SortIcon column={sortKey} sortConfig={sortConfig} />}
         </div>
     </th>
 );
@@ -80,6 +93,18 @@ export default function RecommendationsView() {
     const openPlayer = useOpenPlayer();
     // Abbreviates the given name on a phone; see StatsView.
     const narrow = useIsNarrow();
+
+    // The endpoint returns the same per-player aggregates the stats table uses, so
+    // this tab can offer them too rather than only the four ranking figures.
+    const [selectedColumns, setSelectedColumns] = useState(loadRecColumns);
+    const visibleColumns = useMemo(
+        () => REC_COLUMNS.filter(c => selectedColumns.includes(c.id)),
+        [selectedColumns],
+    );
+    const chooseColumns = (ids) => {
+        setSelectedColumns(ids);
+        storeRecColumns(ids);
+    };
 
     // Which metric the backend's Score column holds for the selected season.
     const [scoreMetric, setScoreMetric] = useState('PIR');
@@ -173,6 +198,15 @@ export default function RecommendationsView() {
         setSortConfig({ key, direction });
     };
 
+    // Rank by RecScore, fixed independently of how the table happens to be sorted.
+    // It used to be the row index, so sorting by any other column handed the medals
+    // and the TOP PICK badge to whoever floated to the top - labelling a 20.37 as the
+    // best pick while a 21.29 sat below it.
+    const rankByPlayer = useMemo(() => {
+        const ranked = [...recommendations].sort((a, b) => (b.RecScore ?? -Infinity) - (a.RecScore ?? -Infinity));
+        return new Map(ranked.map((p, i) => [p.PlayerName, i]));
+    }, [recommendations]);
+
     const sortedRecommendations = useMemo(() => {
         let sortableItems = [...recommendations];
         if (sortConfig.key !== null) {
@@ -243,6 +277,22 @@ export default function RecommendationsView() {
                         value={filters.last_x_games}
                         onChange={(v) => setFilters(prev => ({ ...prev, last_x_games: v }))}
                     />
+
+                    <div className="flex flex-col gap-1">
+                        <label className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Columns</label>
+                        {/* `available` is every column: unlike the stats table, these rows
+                            all come from one endpoint that either returns a field for
+                            everyone or for no one, so there is nothing to grey out. */}
+                        <ColumnPicker
+                            columns={REC_COLUMNS}
+                            categories={REC_COLUMN_CATEGORIES}
+                            selected={selectedColumns}
+                            available={ALL_AVAILABLE}
+                            onChange={chooseColumns}
+                            onReset={() => chooseColumns(REC_DEFAULT_IDS)}
+                            defaultIds={REC_DEFAULT_IDS}
+                        />
+                    </div>
 
                     {/* Was two independent sliders side by side, which let the minimum be
                         dragged above the maximum and return nothing. One control, two
@@ -331,21 +381,27 @@ export default function RecommendationsView() {
                                             Rank
                                         </div>
                                     </th>
-                                    <Th label="Player" sortKey="PlayerName" sortConfig={sortConfig} onSort={requestSort} sticky />
-                                    <Th label="Position" sortKey="position" sortConfig={sortConfig} onSort={requestSort} />
-                                    <Th label="Cost (CR)" sortKey="CR" align="right" sortConfig={sortConfig} onSort={requestSort} />
-                                    {/* Not sortable: the cell is a chart, and the
-                                        sortable figure behind it is the CR column. */}
-                                    <th className="px-4 py-4 text-left whitespace-nowrap">Price trend</th>
-                                    <Th label={`Exp Weighted ${scoreMetric}`} sortKey="ExpWeightedScore" align="right" sortConfig={sortConfig} onSort={requestSort} />
-                                    <Th label="Efficiency" sortKey="Efficiency" align="right" sortConfig={sortConfig} onSort={requestSort} />
-                                    <Th label="Std Error" sortKey="StdErr" align="right" sortConfig={sortConfig} onSort={requestSort} />
-                                    <Th label="Score" sortKey="RecScore" align="right" sortConfig={sortConfig} onSort={requestSort} />
+                                    {visibleColumns.map(col => (
+                                        <Th
+                                            key={col.id}
+                                            label={columnLabel(col, true, scoreMetric)}
+                                            sortKey={columnKey(col, true)}
+                                            align={col.align}
+                                            info={columnInfo(col, scoreMetric)}
+                                            sortConfig={sortConfig}
+                                            onSort={requestSort}
+                                            sticky={col.fmt === 'player'}
+                                            // The price trend cell is a chart; the figure
+                                            // behind it is the CR column, so sort there.
+                                            sortable={col.sortable !== false}
+                                        />
+                                    ))}
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-[#ffffff08]">
                                     {sortedRecommendations.map((player, idx) => {
-                                        const isTopPick = idx < 3;
+                                        const rank = rankByPlayer.get(player.PlayerName) ?? idx;
+                                        const isTopPick = rank < 3;
                                         return (
                                             <tr
                                                 key={player.PlayerName ?? idx}
@@ -358,46 +414,59 @@ export default function RecommendationsView() {
                                                         ? 'bg-gradient-to-br from-yellow-400 to-orange-500 text-black'
                                                         : 'bg-[#ffffff10] text-gray-400'
                                                         }`}>
-                                                        {idx === 0 && '🥇'}
-                                                        {idx === 1 && '🥈'}
-                                                        {idx === 2 && '🥉'}
-                                                        {idx > 2 && (idx + 1)}
+                                                        {rank === 0 && '🥇'}
+                                                        {rank === 1 && '🥈'}
+                                                        {rank === 2 && '🥉'}
+                                                        {rank > 2 && (rank + 1)}
                                                     </div>
                                                 </td>
-                                                <td className={`px-3 md:px-6 py-3 font-medium text-white whitespace-nowrap ${STICKY_CELL}`}>
-                                                    {narrow ? shortName(player.PlayerName) : player.PlayerName}
-                                                    {isTopPick && (
-                                                        <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400 border border-purple-500/30">
-                                                            TOP PICK
-                                                        </span>
-                                                    )}
-                                                </td>
-                                                <td className="px-6 py-3 text-gray-300">{player.position}</td>
-                                                <td className="px-6 py-3 text-right font-mono text-purple-300">
-                                                    {typeof player.CR === 'number' ? player.CR.toFixed(1) : player.CR}
-                                                </td>
-                                                <td className="px-4 py-3">
-                                                    <PriceTrend trend={trendFor(player)} />
-                                                </td>
-                                                <td className="px-6 py-3 text-right font-mono text-white">
-                                                    {typeof player.ExpWeightedScore === 'number' ? player.ExpWeightedScore.toFixed(2) : player.ExpWeightedScore}
-                                                </td>
-                                                <td className="px-6 py-3 text-right font-mono text-green-400">
-                                                    {typeof player.Efficiency === 'number' ? player.Efficiency.toFixed(3) : player.Efficiency}
-                                                </td>
-                                                <td className="px-6 py-3 text-right font-mono text-gray-400">
-                                                    {typeof player.StdErr === 'number' ? player.StdErr.toFixed(2) : player.StdErr}
-                                                </td>
-                                                <td className="px-6 py-3 text-right font-mono font-bold text-purple-400">
-                                                    {typeof player.RecScore === 'number' ? player.RecScore.toFixed(2) : player.RecScore}
-                                                </td>
+                                                {visibleColumns.map(col => {
+                                                    if (col.fmt === 'player') {
+                                                        return (
+                                                            <td key={col.id} className={`px-3 md:px-6 py-3 font-medium text-white whitespace-nowrap ${STICKY_CELL}`}>
+                                                                {narrow ? shortName(player.PlayerName) : player.PlayerName}
+                                                                {isTopPick && (
+                                                                    <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400 border border-purple-500/30">
+                                                                        TOP PICK
+                                                                    </span>
+                                                                )}
+                                                            </td>
+                                                        );
+                                                    }
+                                                    if (col.fmt === 'trend') {
+                                                        return (
+                                                            <td key={col.id} className="px-3 md:px-4 py-3">
+                                                                <PriceTrend trend={trendFor(player)} />
+                                                            </td>
+                                                        );
+                                                    }
+                                                    const value = player[columnKey(col, true)];
+                                                    const alignClass = col.align === 'right' ? 'text-right' : col.align === 'center' ? 'text-center' : 'text-left';
+                                                    const tone = col.id === 'RecScore' ? 'font-bold text-purple-400'
+                                                        : col.id === 'Efficiency' ? 'text-green-400'
+                                                        : col.id === 'ExpWeightedScore' ? 'text-white'
+                                                        : col.id === 'CR' ? 'text-purple-300'
+                                                        : col.strong ? 'font-bold text-white' : 'text-gray-400';
+                                                    const mono = col.fmt !== 'text' ? 'font-mono' : '';
+                                                    return (
+                                                        <td
+                                                            key={col.id}
+                                                            className={`px-3 md:px-6 py-3 ${alignClass} ${mono} ${tone}`}
+                                                            title={col.id === 'Team' ? player.Team : undefined}
+                                                        >
+                                                            {col.id === 'Team' && narrow
+                                                                ? (player.TeamCode ?? formatCell(value, col.fmt))
+                                                                : formatCell(value, col.fmt)}
+                                                        </td>
+                                                    );
+                                                })}
                                             </tr>
                                         );
                                     })}
 
                                 {sortedRecommendations.length === 0 && (
                                     <tr>
-                                        <td colSpan={9} className="px-6 py-12 text-center text-gray-500">
+                                        <td colSpan={visibleColumns.length + 1} className="px-6 py-12 text-center text-gray-500">
                                             No recommendations found. Try adjusting your filters.
                                         </td>
                                     </tr>

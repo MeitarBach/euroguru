@@ -130,6 +130,7 @@ export const formatCell = (value, fmt) => {
     const num = typeof value === 'number' ? value : parseFloat(value);
     if (Number.isNaN(num)) return value;
     if (fmt === 'pct') return `${num.toFixed(1)}%`;
+    if (fmt === 'num2') return num.toFixed(2);
     if (fmt === 'num3') return num.toFixed(3);
     if (fmt === 'sign') return `${num > 0 ? '+' : ''}${num.toFixed(1)}`;
     return Number.isInteger(num) ? num : num.toFixed(1);
