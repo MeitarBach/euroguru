@@ -5,10 +5,21 @@ import { statusOf, statusRank } from '../injuries';
 import { useOpenPlayer } from '../hooks/playerDetailContext';
 import usePriceTrend from '../hooks/usePriceTrend';
 import PriceTrend from './charts/PriceTrend';
+import SeasonNotStarted from './SeasonNotStarted';
 
-// The dashboard has no season selector; it has always reported on this one. Named so
-// the price history and the detail view cannot drift from the widgets.
-const DASHBOARD_SEASON = '2025';
+// The dashboard reports on the current season and falls back only when the user asks
+// it to. Named so the price history and the detail view cannot drift from the widgets.
+//
+// It used to be a lone constant pinned to the finished season, which quietly hid the
+// fact that the new one has no games yet. Pointing at the current season means the
+// page tells the truth about where we are, and SeasonNotStarted handles the stretch
+// between prices going up and the first tip-off.
+const CURRENT_SEASON = '2026';
+const PREVIOUS_SEASON = '2025';
+
+// Written out here as well as in CourtVisionView and RecommendationsView. A shared
+// seasons module is the tidy fix, and worth doing the next time one of those changes.
+const SEASON_LABEL = { '2026': '2026-27', '2025': '2025-26' };
 
 // Rendered as plain elements rather than animated ones. A staggered entrance that
 // starts at opacity 0 leaves the widgets blank whenever the animation frames do not
@@ -228,27 +239,29 @@ const InjuryPanel = ({ injuries, onOpen }) => {
 };
 
 export default function DashboardView() {
-    const [data, setData] = useState({ widgets: {}, injuries: [] });
+    const [season, setSeason] = useState(CURRENT_SEASON);
+    const [data, setData] = useState({ widgets: {}, injuries: [], games_recorded: null });
     const [metric, setMetric] = useState('PIR');
     const [loading, setLoading] = useState(true);
-    const { trendFor } = usePriceTrend(DASHBOARD_SEASON);
+    const { trendFor } = usePriceTrend(season);
     const openPlayer = useOpenPlayer();
-    const open = (name) => openPlayer(name, DASHBOARD_SEASON);
+    const open = (name) => openPlayer(name, season);
 
     useEffect(() => {
         const load = async () => {
             setLoading(true);
-            const res = await fetchDashboardData(DASHBOARD_SEASON);
+            const res = await fetchDashboardData(season);
             // Ensure default structure if api fails or returns partial
             setData({
                 widgets: res?.widgets || {},
-                injuries: res?.injuries || []
+                injuries: res?.injuries || [],
+                games_recorded: res?.games_recorded ?? null
             });
             setMetric(res?.score_metric || 'PIR');
             setLoading(false);
         };
         load();
-    }, []);
+    }, [season]);
 
     if (loading) return (
         <div className="w-full h-[400px] flex items-center justify-center">
@@ -256,13 +269,51 @@ export default function DashboardView() {
         </div>
     );
 
+    // Null rather than 0 when the field is absent, so an API that predates it is not
+    // mistaken for a season with no games. The two Vercel projects deploy separately
+    // and the frontend can briefly be ahead of the backend; erring towards showing the
+    // widgets keeps that window harmless.
+    const started = (data.games_recorded ?? 1) > 0;
+
     return (
         <div className="space-y-6">
             <header>
                 <h2 className="text-2xl font-bold">Season Dashboard</h2>
-                <p className="text-gray-400 text-sm">Smart insights and critical updates.</p>
+                <p className="text-gray-400 text-sm">
+                    Smart insights and critical updates · {SEASON_LABEL[season] ?? season}
+                </p>
             </header>
 
+            {!started && (
+                <SeasonNotStarted
+                    seasonLabel={SEASON_LABEL[season] ?? season}
+                    previousLabel={SEASON_LABEL[PREVIOUS_SEASON]}
+                    onViewPrevious={season === CURRENT_SEASON
+                        ? () => setSeason(PREVIOUS_SEASON)
+                        : undefined}
+                />
+            )}
+
+            {/* Only reachable by choosing it from the empty state, so it says why the
+                page is showing a finished season and offers the way back. Without this
+                the dashboard would silently be about last year. */}
+            {started && season !== CURRENT_SEASON && (
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-3 rounded-xl
+                                bg-[#8b5cf610] border border-[#8b5cf630] text-sm">
+                    <span className="text-gray-300">
+                        Showing the finished {SEASON_LABEL[season]} season.
+                    </span>
+                    <button
+                        type="button"
+                        onClick={() => setSeason(CURRENT_SEASON)}
+                        className="text-purple-300 hover:text-purple-200 font-medium"
+                    >
+                        Back to {SEASON_LABEL[CURRENT_SEASON]}
+                    </button>
+                </div>
+            )}
+
+            {started && (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 md:gap-6">
                 <WidgetColumn
                     title="Who's Hot"
@@ -298,7 +349,10 @@ export default function DashboardView() {
                     onOpen={open}
                 />
             </div>
+            )}
 
+            {/* Outside the gate on purpose: the injury feed does not wait for a season
+                to start, so this still has real data before tip-off. */}
             <InjuryPanel injuries={data.injuries} onOpen={open} />
         </div>
     );

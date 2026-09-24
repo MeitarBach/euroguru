@@ -319,10 +319,29 @@ def get_recommendations(params: RecommendationParams):
 
     return recs.fillna("").to_dict(orient="records")
 
+def _injury_records():
+    """
+    The injury report, or an empty list.
+
+    Its own function because both dashboard paths need it - a season with no games
+    played still has a live injury feed, and that is the one thing the dashboard can
+    honestly show before tip-off. Never raises: injuries are decoration on that
+    endpoint, and losing them should not cost the caller the rest of the response.
+    """
+    from utils.data_processing import load_injuries_df
+
+    try:
+        inj_df = load_injuries_df()
+        return inj_df.fillna("").to_dict(orient="records") if not inj_df.empty else []
+    except Exception as e:
+        print(f"[dashboard] injuries unavailable: {e}")
+        return []
+
+
 @app.get("/api/dashboard")
 def get_dashboard_data(season: str = '2025'):
-    from utils.data_processing import load_injuries_df, calculate_pir_stats
-    
+    from utils.data_processing import calculate_pir_stats
+
     # 1. Load Data
     df = get_data(season)
     if df.empty:
@@ -334,6 +353,30 @@ def get_dashboard_data(season: str = '2025'):
     df = df[df["CR"].notna()]
     if df.empty:
         return {"widgets": {}, "injuries": []}
+
+    # Has this season actually been played yet?
+    #
+    # Between the prices going up and the first tip-off, the merged frame is full of
+    # rows: one per priced player, carrying a name, a team, a position and a cost, and
+    # nulls everywhere a boxscore would be. calculate_pir_stats averages nothing,
+    # fillna(0) turns that into 0.0, and sorting a column of zeroes leaves the players
+    # in alphabetical order - so the widgets render a confident-looking ranking of
+    # A. Abass, A. Bacot, A. Balcerowski, all on 0.0. It reads as broken rather than
+    # as empty.
+    #
+    # Counting distinct GameCodes asks the question directly instead of inferring it
+    # from suspicious-looking numbers, which matters because averaging 0.0 over real
+    # games is a thing a real player can do.
+    games_recorded = int(df["GameCode"].nunique(dropna=True)) if "GameCode" in df.columns else 0
+    if games_recorded == 0:
+        return {
+            "widgets": {},
+            # Still real, and still current: the injury feed does not wait for a season
+            # to start.
+            "injuries": _injury_records(),
+            "score_metric": score_metric(df),
+            "games_recorded": 0,
+        }
 
     # --- Widget 1: "Who's Hot 🔥" (Last 3 Games) ---
     stats_hot = calculate_pir_stats(df, last_x_games=3)
@@ -369,20 +412,15 @@ def get_dashboard_data(season: str = '2025'):
     # The whole report, not a slice. This used to be head(10), which hid 19 of 29
     # players with nothing in the UI saying so - the client decides what to show and
     # how much to collapse. Around 6KB, on an endpoint that is already edge-cached.
-    injuries = []
-    try:
-        inj_df = load_injuries_df()
-        if not inj_df.empty:
-            injuries = inj_df.fillna("").to_dict(orient="records")
-    except Exception as e:
-        # Injuries are decoration on this endpoint; the widgets are the point. Say so
-        # rather than swallowing it silently, which is what a bare except did before.
-        print(f"[dashboard] injuries unavailable: {e}")
+    injuries = _injury_records()
 
     return {
         "widgets": widgets,
         "injuries": injuries,
         # Lets the widgets label their numbers correctly instead of always saying PIR.
-        "score_metric": score_metric(df)
+        "score_metric": score_metric(df),
+        # How many games this season has on record. The client shows an empty state
+        # rather than the widgets when it is 0.
+        "games_recorded": games_recorded,
     }
 
