@@ -27,7 +27,7 @@ export default function PriceTrend({ trend, width = 64, showBadge = true, classN
                 values={values}
                 change={change}
                 width={width}
-                title={`${playerName}: ${trend.first} to ${trend.last} CR over ${series.length} snapshots`}
+                title={`${playerName}: ${trend.first} to ${trend.last} CR over ${series.length} rounds`}
             />
             {showBadge && (
                 <span className={`text-[11px] font-medium tabular-nums ${toneFor(change)}`}>

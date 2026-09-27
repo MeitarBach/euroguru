@@ -27,7 +27,9 @@ import pandas as pd
 from .s3_utils import list_bucket, load_from_s3, save_to_s3
 # season_for_date lives in data_processing because the CR-key resolution there needs it
 # too, and importing it the other way round would make the two modules circular.
-from .data_processing import _CR_KEY_RE, _name_key, season_for_date
+from .data_processing import (
+    _CR_KEY_RE, _name_key, round_as_of, round_end_dates, season_for_date,
+)
 
 SNAPSHOT_PREFIX = "player_cr_data"
 HISTORY_PREFIX = "cr_history"
@@ -228,6 +230,53 @@ def load_cr_history(season, index=None):
     return history[history["Season"] == str(season)].reset_index(drop=True)
 
 
+def schedule_key(season):
+    return f"schedule_{season}.csv"
+
+
+def to_rounds(df, schedule_df):
+    """
+    Turn a season's dated snapshots into one row per player per round.
+
+    Prices move once a round, so a round is the honest x-axis unit; the snapshot
+    dates are just when the fetcher happened to run. Several snapshots inside one
+    round carry the same prices - four identical pre-season readings in 2026-27, three
+    identical ones across round 29 of 2025-26 - and plotting each of them draws
+    meaningless flat steps and stretches the real moves out of shape.
+
+    The last snapshot in a round wins, because that is the settled price: an earlier
+    one may have been taken before the provider republished. A reading from before
+    round 1 becomes round 0, the season's opening price.
+
+    Returns the frame unchanged when there is no schedule to date the rounds with -
+    without one there is nothing better than the snapshot dates to show.
+    """
+    round_ends = round_end_dates(schedule_df)
+    if df.empty or len(round_ends) == 0:
+        return df
+
+    # One date resolves to one round, and a season has a dozen-odd snapshot dates
+    # against thousands of rows, so the lookup is built once instead of per row -
+    # round_as_of scans the whole round table each call.
+    by_date = {day: round_as_of(round_ends, day) for day in df["Date"].unique()}
+
+    out = df.copy()
+    # Derived from the schedule, not from the fetcher's own Round stamp, even where
+    # that stamp exists. They answer different questions: the stamp is the highest
+    # round in the game log, and a round enters that log as soon as its FIRST game
+    # is played (see _matchday_played), so a fetch on a game day stamps the round
+    # still in progress - while the prices it reads are still the previous round's.
+    # Deriving every row keeps one definition across the whole series; mixing them
+    # would put a mid-round price under a round that had not finished.
+    out["Round"] = out["Date"].map(by_date).astype(int)
+
+    return (
+        out.sort_values(["SeriesKey", "Round", "Date"])
+        .drop_duplicates(subset=["SeriesKey", "Round"], keep="last")
+        .reset_index(drop=True)
+    )
+
+
 _payload_cache = {}
 _payload_lock = threading.Lock()
 _PAYLOAD_MAX_ENTRIES = 8
@@ -243,12 +292,18 @@ def cr_history_payload(season, index=None):
     """
     index = index if index is not None else list_bucket()
     key = history_key(season)
+    # The schedule is what dates the rounds, so a corrected one has to invalidate
+    # this cache exactly like a new snapshot does.
+    sched_key = schedule_key(season)
+    sched_stamp = (sched_key, index.get(sched_key))
 
     if key in index:
-        cache_key = (season, key, index[key])
+        cache_key = (season, key, index[key], sched_stamp)
     else:
         # Falling back to the snapshots - the cache key has to cover all of them.
-        cache_key = (season, tuple((k, index[k]) for k in _snapshot_keys(index)))
+        cache_key = (
+            season, tuple((k, index[k]) for k in _snapshot_keys(index)), sched_stamp
+        )
 
     with _payload_lock:
         hit = _payload_cache.get(cache_key)
@@ -256,7 +311,11 @@ def cr_history_payload(season, index=None):
         return hit
 
     df = load_cr_history(season, index)
-    payload = {"season": str(season), "players": series_by_player(df)}
+    schedule_df = load_from_s3(sched_key) if sched_key in index else None
+    payload = {
+        "season": str(season),
+        "players": series_by_player(to_rounds(df, schedule_df)),
+    }
 
     with _payload_lock:
         if cache_key not in _payload_cache and len(_payload_cache) >= _PAYLOAD_MAX_ENTRIES:
@@ -276,7 +335,12 @@ def series_by_player(df):
     if df.empty:
         return []
 
-    df = df.sort_values(["SeriesKey", "Date"])
+    # Round first once to_rounds has dated them, so the series runs in the order the
+    # chart plots it. Date is the fallback for a season with no schedule, and the
+    # tiebreak within a round for one that has.
+    by_round = "Round" in df.columns and df["Round"].notna().all()
+    df = df.sort_values(["SeriesKey", "Round", "Date"] if by_round
+                        else ["SeriesKey", "Date"])
     players = []
     for key, group in df.groupby("SeriesKey", sort=False):
         crs = group["CR"].tolist()

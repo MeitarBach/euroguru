@@ -124,8 +124,10 @@ export default function PriceTrackerPanel({ season, games = FULL_SEASON, onSelec
 
     const byKey = useMemo(() => new Map(windowed.map(p => [p.playerKey, p])), [windowed]);
     const selectedKeys = useMemo(() => charted.map(p => p.playerKey), [charted]);
-    const snapshots = useMemo(
-        () => new Set(windowed.flatMap(p => p.series.map(s => s.date))).size,
+    // Rounds, not snapshot dates: several fetches can land inside one round and the
+    // chart shows one point per round, so counting dates would over-report the axis.
+    const rounds = useMemo(
+        () => new Set(windowed.flatMap(p => p.series.map(s => s.round ?? s.date))).size,
         [windowed]
     );
 
@@ -163,7 +165,7 @@ export default function PriceTrackerPanel({ season, games = FULL_SEASON, onSelec
                     Biggest movers
                 </button>
                 <span className="text-xs text-gray-600 ml-auto">
-                    {windowed.length} players · {snapshots} {snapshots === 1 ? 'snapshot' : 'snapshots'}
+                    {windowed.length} players · {rounds} {rounds === 1 ? 'round' : 'rounds'}
                 </span>
             </div>
 
@@ -171,7 +173,7 @@ export default function PriceTrackerPanel({ season, games = FULL_SEASON, onSelec
                 was repriced looks like the panel failed rather than like news. */}
             {windowed.length > 0 && windowed.every(p => p.change === 0) && (
                 <p className="text-xs text-amber-400/80 mb-3">
-                    No player was repriced across {snapshots === 2 ? 'these two snapshots' : 'this window'} —
+                    No player was repriced across {rounds === 2 ? 'these two rounds' : 'this window'} —
                     widen “Based on” to see movement.
                 </p>
             )}

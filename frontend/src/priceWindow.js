@@ -8,11 +8,15 @@ export const FULL_SEASON = 100;
  * are a change from, so "Last game" means the most recent move rather than a single
  * point with nothing to compare it to.
  *
- * Rounds are used when the snapshots carry them, which is only those written after
- * the fetcher started stamping Round. Everything before falls back to snapshot dates
- * - the honest unit for that data, since nothing recorded which round it belonged to.
- * A null-round point is treated as predating round 1, so it appears only when the
+ * Rounds are the unit: the API dates every point to the round it belongs to and sends
+ * one point per round. Snapshot dates remain the fallback for a season with no
+ * schedule to date the rounds with, where nothing can say which round a price belongs
+ * to. A null-round point is treated as predating round 1, so it appears only when the
  * window reaches back that far.
+ *
+ * Note the window counts rounds, not points: rounds nobody recorded a price for are
+ * absent from the series, so "last 5" over a sparsely sampled season returns the
+ * points falling in the last 5 rounds, which can be fewer than 5.
  *
  * Lived in PriceTrackerPanel until the recommendations table needed the same
  * windowing for its sparkline column.

@@ -221,6 +221,51 @@ def season_for_date(day):
     return str(day.year if day.month >= 8 else day.year - 1)
 
 
+def round_end_dates(schedule_df):
+    """
+    When each round finished: {round number -> last game date}, ascending.
+
+    Fixtures the league has not scheduled yet carry a blank Date, and Round is
+    NaN-coercible, so both are dropped rather than guessed - an unplaced fixture
+    cannot say anything about when its round ended.
+    """
+    if schedule_df is None or schedule_df.empty:
+        return pd.Series(dtype="datetime64[ns]")
+    if not {"Round", "Date"} <= set(schedule_df.columns):
+        return pd.Series(dtype="datetime64[ns]")
+
+    frame = pd.DataFrame({
+        "Round": pd.to_numeric(schedule_df["Round"], errors="coerce"),
+        "Date": pd.to_datetime(schedule_df["Date"], errors="coerce"),
+    }).dropna()
+    if frame.empty:
+        return pd.Series(dtype="datetime64[ns]")
+    return frame.groupby("Round")["Date"].max().sort_index()
+
+
+def round_as_of(round_ends, day):
+    """
+    How many rounds had finished when a price was read. 0 before round 1.
+
+    A round counts once its last game is behind `day`: that is what the fantasy
+    provider has repriced against by then. Zero rather than None for a pre-season
+    reading, so it becomes an ordinary point on the axis ("Start") instead of a hole.
+
+    Prices are published a day or two after a round ends, so a snapshot taken inside
+    that gap is labelled with the round it does not yet reflect. That costs nothing
+    here: the caller keeps only the last snapshot in each round, which discards the
+    early one in favour of the settled price.
+
+    Dates decide this, not the schedule's Played flag - Played records what the
+    league had played by the last fetch, which for an archive season is a different
+    question from what had been played on the day a price was read.
+    """
+    if round_ends is None or len(round_ends) == 0:
+        return 0
+    finished = round_ends[round_ends < pd.Timestamp(day)]
+    return int(finished.index.max()) if len(finished) else 0
+
+
 def _dated_cr_keys(index, prefix="player_cr_data"):
     """Every dated snapshot as (key, date). The undated legacy file never matches."""
     found = []

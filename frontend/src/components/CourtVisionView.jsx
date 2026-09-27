@@ -36,7 +36,7 @@ const BUILT_INS = [
         // from two columns of the player table; it has no x/y at all.
         kind: 'priceHistory',
         title: 'Price Tracker — what players cost over time',
-        subtitle: 'CR by snapshot date',
+        subtitle: 'CR by round',
     },
 ];
 
@@ -46,12 +46,26 @@ const BUILT_INS = [
  * Order, collapsed state and layers all persist, so a built-in dragged to the
  * bottom stays there. Appending missing built-ins means a new one added in a later
  * release still shows up for someone with existing saved charts.
+ *
+ * A built-in's wording comes back from BUILT_INS rather than from the saved copy:
+ * the title and subtitle describe what the chart draws, so when that changes - the
+ * Price Tracker moving from snapshot dates to rounds - the saved text would
+ * otherwise keep describing the old chart forever. Everything the user arranged
+ * is theirs and survives; only the labels are refreshed.
  */
 const initialCharts = () => {
     const saved = loadStored(CHARTS_STORAGE_KEY, null);
     if (!Array.isArray(saved) || !saved.length) return BUILT_INS.map(c => ({ ...c }));
 
-    const known = saved.filter(c => c && (c.kind || (c.x && c.y && c.layers)));
+    const builtIn = new Map(BUILT_INS.map(b => [b.id, b]));
+    const known = saved
+        .filter(c => c && (c.kind || (c.x && c.y && c.layers)))
+        .map(c => {
+            const source = builtIn.get(c.id);
+            return source
+                ? { ...c, title: source.title, subtitle: source.subtitle, kind: source.kind }
+                : c;
+        });
     const missing = BUILT_INS.filter(b => !known.some(c => c.id === b.id));
     return [...known, ...missing.map(c => ({ ...c }))];
 };
