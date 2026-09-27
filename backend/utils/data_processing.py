@@ -401,6 +401,27 @@ def _build_merged_frame(candidates, cr_key, index, include_injuries, injuries_ke
     # Normalise before anything else touches the frame, so the merge, the aggregates
     # and the API all see one vocabulary regardless of which fetcher wrote the season.
     player_stats_df = normalise_stats_columns(player_stats_df)
+
+    # The fantasy feed has no minutes and no shot attempts, so on its own it cannot
+    # produce TS%, Usage%, START% or a minutes trend. The Euroleague boxscore for the
+    # same season does, and a season lists both files - so the remaining candidates
+    # are folded in rather than left unread. Normalised first, so the two frames are
+    # compared on one vocabulary and an alias cannot arrive as a duplicate column.
+    schedule_df = load_from_s3(schedule_key) if schedule_key else None
+    if schedule_df is not None:
+        print(f"Schedule loaded from file {schedule_key}")
+
+    if "FPT" in player_stats_df.columns:
+        others = [c for c in candidates if c != stats_key]
+        boxscore_df, boxscore_key = _load_first_available(others) if others else (None, "")
+        if boxscore_df is not None and not boxscore_df.empty:
+            print(f"Boxscore columns loaded from file {boxscore_key}")
+            player_stats_df = merge_boxscore_columns(
+                player_stats_df, normalise_stats_columns(boxscore_df), schedule_df
+            )
+
+    # After the boxscore merge, so TS% and Usage% see the minutes and attempts it
+    # brought in - computed here they would otherwise be silently absent.
     player_stats_df = add_derived_stats(player_stats_df)
 
     if cr_key is None:
@@ -414,9 +435,7 @@ def _build_merged_frame(candidates, cr_key, index, include_injuries, injuries_ke
     # Opponent, home/away, date and the real round. Joined before the CR merge, which
     # does an outer join that adds priced-but-gameless rows - those have no fixture and
     # would only dilute the coverage figure this reports.
-    if schedule_key:
-        schedule_df = load_from_s3(schedule_key)
-        print(f"Schedule loaded from file {schedule_key}")
+    if schedule_df is not None:
         player_stats_df = _merge_schedule(player_stats_df, schedule_df)
 
     # Fantasy-sourced rows carry FPT and share the CR file's player ids, so they join
@@ -428,14 +447,16 @@ def _build_merged_frame(candidates, cr_key, index, include_injuries, injuries_ke
 
     merged_df["CR"] = pd.to_numeric(merged_df.get("CR"), errors="coerce")
 
-    # A stable identity the client can join against the CR history, which is keyed by
-    # the same function. Matching on the display name does not work: format_name turns
+    # A stable identity the client can join against the CR history, which is keyed the
+    # same way. Matching on the display name does not work: format_name turns
     # "WRIGHT IV, MCKINLEY" into "Mckinley Wright iv" while the snapshot spells him
     # "Mckinley Wright Iv", and the aggregations group by name so PlayerID is gone by
     # the time the API responds.
-    merged_df["PlayerKey"] = merged_df["PlayerName"].apply(
-        lambda name: _name_key(name) if pd.notna(name) else None
-    )
+    merged_df["PlayerKey"] = _identity_keys(merged_df)
+
+    # After the key is taken, never before: the key must stay the player's own, not
+    # one derived from a name this may have just changed.
+    merged_df = _disambiguate_names(merged_df)
 
     if "position" in merged_df.columns:
         # fillna before the cast: astype(str) would turn NaN into the string "nan",
@@ -491,6 +512,178 @@ def _load_first_available(candidates):
     return pd.DataFrame(columns=STATS_BASE_COLUMNS), (candidates[-1] if candidates else "")
 
 
+# Generational suffixes. The Euroleague boxscore keeps them on the surname
+# ("BALDWIN IV, WADE", "BACOT JR., ARMANDO") and the fantasy feed drops them
+# ("W. Baldwin", "A. Bacot"), so they are removed before the two are compared.
+_NAME_SUFFIXES = {"JR", "SR", "II", "III", "IV", "V"}
+
+# Counting stats both feeds report independently, used to verify a name-based match.
+_BOXSCORE_CROSSCHECK = ["Points", "TotalRebounds", "Assistances", "Steals", "Turnovers"]
+
+
+def _join_name_parts(name):
+    """(first initial, surname) for cross-source matching, suffix removed."""
+    text = unicodedata.normalize("NFKD", str(name))
+    text = "".join(c for c in text if not unicodedata.combining(c)).upper()
+    text = text.replace("-", " ").replace("'", "").replace(".", "")
+    text = re.sub(r"\s+", " ", text).strip()
+
+    if "," in text:
+        last, first = text.split(",", 1)
+    else:
+        tokens = text.split(" ")
+        first, last = (tokens[0], " ".join(tokens[1:])) if len(tokens) > 1 else ("", text)
+
+    last = " ".join(w for w in last.split() if w not in _NAME_SUFFIXES)
+    return first.strip()[:1], last.strip()
+
+
+def _boxscore_join_columns(df, round_and_code):
+    """Attach (round, Euroleague team code, initial+surname key, surname key)."""
+    rounds, codes = round_and_code
+    parts = [_join_name_parts(n) for n in df["PlayerName"]]
+    return df.assign(
+        _jr=pd.Series(rounds, index=df.index, dtype="Int64"),
+        _jc=pd.Series(codes, index=df.index, dtype=object),
+        # The full key, not the bare initial: an initial alone is not an identity,
+        # and within one squad several players routinely share one.
+        _ji=pd.Series([f"{i}|{s}" for i, s in parts], index=df.index, dtype=object),
+        _js=pd.Series([s for _, s in parts], index=df.index, dtype=object),
+    )
+
+
+def _boxscore_round_and_code(boxscore_df, schedule_df):
+    """
+    Place each boxscore row on a (round, team code), via the fixture list.
+
+    The two feeds count games differently - the boxscore's GameCode is a game id
+    (1-10 covers round 1), the fantasy feed's is the round itself - so the schedule
+    is what lets a boxscore row be matched to the round a fantasy row belongs to.
+    """
+    fixtures = {}
+    if schedule_df is not None and not schedule_df.empty:
+        codes = pd.to_numeric(schedule_df["GameCode"], errors="coerce")
+        for code, row in zip(codes, schedule_df.itertuples()):
+            if pd.notna(code):
+                fixtures[int(code)] = row
+
+    rounds, team_codes = [], []
+    for game_code, team in zip(
+        pd.to_numeric(boxscore_df["GameCode"], errors="coerce"), boxscore_df["Team"]
+    ):
+        fixture = fixtures.get(int(game_code)) if pd.notna(game_code) else None
+        if fixture is None or pd.isna(fixture.Round):
+            rounds.append(pd.NA)
+            team_codes.append(None)
+            continue
+        side = _side_of(team, fixture.HomeTeam, fixture.HomeCode,
+                        fixture.AwayTeam, fixture.AwayCode)
+        rounds.append(int(fixture.Round))
+        team_codes.append(
+            fixture.HomeCode if side == "home"
+            else (fixture.AwayCode if side == "away" else None)
+        )
+    return rounds, team_codes
+
+
+def merge_boxscore_columns(fantasy_df, boxscore_df, schedule_df):
+    """
+    Add the columns only the Euroleague boxscore has onto the fantasy game log.
+
+    The fantasy feed is the spine: it owns FPT, CR and the Dunkest player id that the
+    price history joins on, and nothing it already carries is overwritten. What it
+    has never carried is minutes and shot attempts, without which TS%, Usage%,
+    START% and the minutes trend cannot be computed at all - those live only in the
+    boxscore, so the two are joined rather than one being chosen over the other.
+
+    The feeds share no player id (3791 against P011157), so the join is on
+    (round, team, name). Team comes from DUNKEST_TEAM_CODES on one side and the
+    fixture list on the other, which is also what separates the players the
+    abbreviated names collapse together: "C. Jones" is Carlik at Partizan and Chris
+    at Crvena Zvezda, and they join to different rows because their teams differ.
+
+    Two passes. The first keys on initial plus surname; the second retries whatever
+    is left on the surname alone, and only where that surname is unique within the
+    same team and round on both sides - which is what recovers a player the feeds
+    call by different first names ("A. Balcerowski" against "BALCEROWSKI, OLEK")
+    without ever guessing between two candidates.
+    """
+    if fantasy_df.empty or boxscore_df is None or boxscore_df.empty:
+        return fantasy_df
+    if not {"GameCode", "Team", "PlayerName"} <= set(fantasy_df.columns):
+        return fantasy_df
+    if not {"GameCode", "Team", "PlayerName"} <= set(boxscore_df.columns):
+        return fantasy_df
+
+    extra = [c for c in boxscore_df.columns if c not in fantasy_df.columns]
+    if not extra:
+        return fantasy_df
+
+    # Both feeds count the same counting stats independently, which makes them a free
+    # check on the join: a row matched to the wrong player almost never agrees on all
+    # of them. Carried through the merge as _chk_ columns and compared at the end.
+    shared = [c for c in _BOXSCORE_CROSSCHECK
+              if c in boxscore_df.columns and c in fantasy_df.columns]
+    checks = {c: f"_chk_{c}" for c in shared}
+
+    box = _boxscore_join_columns(
+        boxscore_df.rename(columns=checks),
+        _boxscore_round_and_code(boxscore_df, schedule_df),
+    )
+    box = box.dropna(subset=["_jr", "_jc"])
+    carry = extra + list(checks.values())
+
+    fantasy_rounds = pd.to_numeric(fantasy_df["GameCode"], errors="coerce").astype("Int64")
+    fantasy_codes = (
+        fantasy_df["Team"].astype(str).str.strip().str.upper().map(DUNKEST_TEAM_CODES)
+    )
+    left = _boxscore_join_columns(fantasy_df, (fantasy_rounds, fantasy_codes))
+
+    # A duplicate on either side would fan a player's row out into several, so the
+    # key is required to be unique before it is trusted.
+    keys = ["_jr", "_jc", "_ji"]
+    right = box.drop_duplicates(subset=keys, keep=False)[keys + carry]
+    merged = left.merge(right, on=keys, how="left")
+
+    probe = extra[0]
+    missing = merged[probe].isna()
+    if missing.any():
+        fallback_keys = ["_jr", "_jc", "_js"]
+        # Unique on both sides, so the surname cannot mean two different players.
+        right2 = box.drop_duplicates(subset=fallback_keys, keep=False)[fallback_keys + carry]
+        wanted = left.drop_duplicates(subset=fallback_keys, keep=False)[fallback_keys]
+        right2 = right2.merge(wanted, on=fallback_keys, how="inner")
+        if not right2.empty:
+            patch = merged[fallback_keys].merge(right2, on=fallback_keys, how="left")
+            patch.index = merged.index
+            for col in carry:
+                merged.loc[missing, col] = patch.loc[missing, col]
+
+    matched = merged[probe].notna()
+
+    # A row that disagrees with the boxscore on the counting stats was matched to the
+    # wrong player, so its boxscore columns are discarded. Missing minutes are a gap
+    # in the UI; minutes belonging to someone else are a wrong number presented as a
+    # right one, which is the worse failure.
+    if checks:
+        disagrees = pd.Series(False, index=merged.index)
+        for col, chk in checks.items():
+            left_vals = pd.to_numeric(merged[col], errors="coerce")
+            right_vals = pd.to_numeric(merged[chk], errors="coerce")
+            disagrees |= right_vals.notna() & (left_vals != right_vals)
+        rejected = int((matched & disagrees).sum())
+        if rejected:
+            merged.loc[disagrees, extra] = np.nan
+            matched = merged[probe].notna()
+            print(f"Boxscore merge: rejected {rejected} row(s) that disagreed with the "
+                  f"fantasy feed on {', '.join(shared)}")
+
+    print(f"Boxscore merge: {matched.sum()}/{len(merged)} fantasy rows matched, "
+          f"{len(extra)} columns added")
+
+    return merged.drop(columns=["_jr", "_jc", "_ji", "_js"] + list(checks.values()))
+
+
 def _cr_for_merge(cr_df):
     """
     Rename the CR side's identity columns so a merge cannot produce _x/_y pairs.
@@ -512,6 +705,79 @@ def _coalesce_identity(merged_df):
             merged_df[target] = merged_df[source]
         merged_df = merged_df.drop(columns=[source])
     return merged_df
+
+
+def _identity_keys(df):
+    """
+    A per-player key that survives the abbreviated names the fantasy API returns.
+
+    Deliberately the same rule and the same format as cr_history._series_keys - the
+    id where there is one, the initial+surname key otherwise - so a player row and a
+    price series join on a value that two players cannot share.
+    """
+    ids = (
+        pd.to_numeric(df["PlayerID"], errors="coerce") if "PlayerID" in df.columns
+        else pd.Series(pd.NA, index=df.index, dtype="Float64")
+    )
+    return [
+        f"id:{int(pid)}" if pd.notna(pid)
+        else (_name_key(name) if pd.notna(name) else None)
+        for pid, name in zip(ids, df["PlayerName"])
+    ]
+
+
+def _disambiguate_names(df):
+    """
+    Make PlayerName unique per player, so the aggregations can keep grouping by it.
+
+    The fantasy API abbreviates first names, so "C. Jones" is two different players in
+    the same round - Carlik at Partizan and Chris at Crvena Zvezda - and so are
+    "D. Hall" (Devon at Milan, Donta at Olympiacos) and "M. Wright". Every
+    aggregation here groups by PlayerName, which
+    merged each pair into one player carrying both their games. PlayerID tells them
+    apart, so where one name covers several ids the team is appended: the shortest
+    thing that distinguishes them on screen.
+
+    Only genuinely colliding names are touched, and the team is taken per player
+    rather than per row, so a mid-season transfer cannot split one player in two.
+    """
+    if "PlayerID" not in df.columns or "PlayerName" not in df.columns:
+        return df
+
+    names = df["PlayerName"].astype(str).str.strip()
+    ids = pd.to_numeric(df["PlayerID"], errors="coerce")
+
+    # Rows with no id are no evidence of a second player: the archive seasons carry
+    # none at all, and counting them would rename players who never collided.
+    known = pd.DataFrame({"name": names, "id": ids})[ids.notna()]
+    if known.empty:
+        return df
+
+    per_name = known.groupby("name")["id"].nunique()
+    ambiguous = set(per_name[per_name > 1].index)
+    if not ambiguous:
+        return df
+
+    team = df.get("Team")
+    if team is None:
+        team = df.get("TeamCode")
+    if team is None:
+        return df
+    team = team.astype(str).str.strip()
+
+    # Last seen team per player, so every row of one player gets the same suffix.
+    team_by_id = known.assign(team=team).groupby("id")["team"].last()
+
+    def label(name, pid):
+        if name not in ambiguous or pd.isna(pid):
+            return name
+        suffix = team_by_id.get(pid, "")
+        return f"{name} ({suffix})" if suffix and suffix.lower() != "nan" else name
+
+    df = df.copy()
+    df["PlayerName"] = [label(n, i) for n, i in zip(names, ids)]
+    print(f"Disambiguated colliding player names: {sorted(ambiguous)}")
+    return df
 
 
 def _merge_cr_by_player_id(stats_df, cr_df):

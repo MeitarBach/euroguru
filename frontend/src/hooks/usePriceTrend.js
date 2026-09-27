@@ -36,16 +36,22 @@ export default function usePriceTrend(season, games = FULL_SEASON) {
     // record describe the selected stretch and not the season.
     const windowed = useMemo(() => applyWindow(players, games), [players, games]);
 
-    // nameKey is the backend's _name_key of the player's name, and the API now stamps
-    // the same value onto every player row as PlayerKey, so the two join exactly.
+    // A player row's PlayerKey is the player id where the season has one ("id:3791")
+    // and the initial+surname key otherwise, which is exactly how the history keys its
+    // own playerKey and nameKey. Both are indexed so either form finds its series.
     // Matching on the display name does not work - the stats and the price snapshots
     // capitalise names differently ("Mckinley Wright iv" vs "Mckinley Wright Iv").
     const byKey = useMemo(() => {
         const map = new Map();
-        for (const player of windowed) {
-            const existing = map.get(player.nameKey);
+        const add = (key, player) => {
+            if (!key) return;
+            const existing = map.get(key);
             if (existing) existing.push(player);
-            else map.set(player.nameKey, [player]);
+            else map.set(key, [player]);
+        };
+        for (const player of windowed) {
+            add(player.playerKey, player);
+            if (player.nameKey !== player.playerKey) add(player.nameKey, player);
         }
         return map;
     }, [windowed]);
