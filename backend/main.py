@@ -107,6 +107,46 @@ DEFAULT_SEASON = '2026'
 # real fantasy-points data to look at.
 ELITE_SCORE_THRESHOLD = 15
 
+# How hard the same widget punishes volatility, in standard deviations. It answers
+# "who can I count on", so a player is ranked by the score they reliably clear -
+# their average less this many deviations - rather than by their average alone.
+#
+# Measured against the finished 2025-26 season rather than picked. At 1 the average
+# still decides: a 27-point scorer swinging by 10.4 tops the list. At 3 the order
+# stops moving. 2 is where volatility leads while output still separates players
+# with similar swings - it puts a 21-point scorer at 6.1 above an 18-point one at
+# 5.2, which sorting on the deviation alone gets backwards.
+CONSISTENCY_VOLATILITY_WEIGHT = 2.0
+
+
+def _reliable_floor(stats):
+    """
+    Average score less CONSISTENCY_VOLATILITY_WEIGHT deviations: what a player can be
+    counted on for, in the same units as the score itself.
+
+    An unknown deviation counts as zero rather than dropping the player. One round
+    into a season nobody has one - a single game has nothing to vary from - and
+    ranking on the average alone is the honest answer until a second game exists.
+    """
+    mean = pd.to_numeric(stats["Average_Score"], errors="coerce")
+    deviation = pd.to_numeric(stats["StdDev_Score"], errors="coerce").fillna(0)
+    return mean - CONSISTENCY_VOLATILITY_WEIGHT * deviation
+
+
+def _widget_records(frame, keep_null=()):
+    """
+    Widget rows as dicts, with NaN filled to 0 except where that would be a claim.
+
+    A missing deviation is not zero deviation, and a zero in the UI reads as "never
+    varies" rather than "not known yet", so those columns stay null and the client
+    renders a dash.
+    """
+    filled = frame.fillna(0)
+    for column in keep_null:
+        if column in frame.columns:
+            filled[column] = frame[column].astype(object).where(frame[column].notna(), None)
+    return filled.to_dict(orient="records")
+
 
 def get_data(season=DEFAULT_SEASON):
     candidates = DATA_FILES.get(season)
@@ -389,7 +429,7 @@ def get_dashboard_data(season: str = DEFAULT_SEASON):
         return {"widgets": {}, "injuries": []}
     hot_players = stats_hot.sort_values('Average_Score', ascending=False).head(5)
 
-    # --- Widget 2: "Consistent Elite 🎯" (Last 5 Games, high scorers, Lowest StdDev) ---
+    # --- Widget 2: "Consistent Elite 🎯" (Last 5 Games, high scorers, steadiest first) ---
     stats_cons = calculate_pir_stats(df, last_x_games=5)
     # Filter for elite scorers first. The threshold is calibrated for PIR; on the
     # fantasy-points scale it means something different, so the fallback below is
@@ -399,8 +439,17 @@ def get_dashboard_data(season: str = DEFAULT_SEASON):
         # Fallback if no one clears the bar (early season?) -> take top 20 scorers
         elite = stats_cons.sort_values('Average_Score', ascending=False).head(20)
 
-    # Sort by Consistency (Lowest StdDev)
-    consistent_players = elite.sort_values('StdDev_Score', ascending=True).head(5)
+    # Ranked on the floor rather than the deviation alone, so output still separates
+    # players who swing by similar amounts. Sorting on StdDev by itself also had no
+    # tiebreak, and a single game gives everyone the same (absent) deviation - so
+    # early in a season the sort did nothing and the widget quietly showed whoever
+    # came first alphabetically.
+    consistent_players = (
+        elite.assign(_floor=_reliable_floor(elite))
+        .sort_values("_floor", ascending=False)
+        .head(5)
+        .drop(columns="_floor")
+    )
 
     # --- Widget 3: "Budget Picks 💰" (Last 5 Games, CR < 10, Highest Avg Score) ---
     # Re-use stats_cons (Last 5 games is good baseline)
@@ -408,9 +457,9 @@ def get_dashboard_data(season: str = DEFAULT_SEASON):
     budget_players = budget.sort_values('Average_Score', ascending=False).head(5)
 
     widgets = {
-        "hot": hot_players.fillna(0).to_dict(orient="records"),
-        "consistent": consistent_players.fillna(0).to_dict(orient="records"),
-        "budget": budget_players.fillna(0).to_dict(orient="records")
+        "hot": _widget_records(hot_players),
+        "consistent": _widget_records(consistent_players, keep_null=("StdDev_Score",)),
+        "budget": _widget_records(budget_players),
     }
 
     # 4. Injuries (if available)

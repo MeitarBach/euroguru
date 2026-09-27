@@ -14,6 +14,10 @@ import SeasonNotStarted from './SeasonNotStarted';
 // going up and the first tip-off.
 import { CURRENT_SEASON, PREVIOUS_SEASON, SEASON_LABEL } from '../seasons';
 
+// Mirrors ELITE_SCORE_THRESHOLD in main.py, for the Consistent Elite subtitle. Only
+// ever a label - the filtering itself happens server-side.
+const ELITE_MIN = 15;
+
 // Rendered as plain elements rather than animated ones. A staggered entrance that
 // starts at opacity 0 leaves the widgets blank whenever the animation frames do not
 // run - a backgrounded tab, for instance - and the delay only postponed content the
@@ -52,7 +56,11 @@ const PlayerCard = ({ player, rank, type, metric = 'PIR', trend, onOpen }) => (
                         <span className="text-[10px] text-gray-500">{metric}</span>
                     </div>
                     <div className="flex items-center gap-2 text-xs">
-                        <span className="text-blue-400">{player.StdDev_Score?.toFixed(1)}</span>
+                        <span className="text-blue-400">
+                            {player.StdDev_Score === null || player.StdDev_Score === undefined
+                                ? '—'
+                                : player.StdDev_Score.toFixed(1)}
+                        </span>
                         <span className="text-[10px] text-gray-500">SD</span>
                         <span className="text-gray-300 ml-1">{player.CR} CR</span>
                     </div>
@@ -321,7 +329,7 @@ export default function DashboardView() {
                 />
                 <WidgetColumn
                     title="Consistent Elite"
-                    subtitle={`Last 5 games (top by ${metric})`}
+                    subtitle={`Last 5 games (steady, ${ELITE_MIN}+ ${metric})`}
                     icon={Target}
                     color="text-blue-500"
                     players={data.widgets.consistent}
