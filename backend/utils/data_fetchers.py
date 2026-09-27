@@ -16,6 +16,17 @@ FANTASY_API_BASE = "https://fantaking-api.dunkest.com/api/v1"
 FANTASY_ORIGIN = "https://euroleaguefantasy.euroleaguebasketball.net"
 FANTASY_PAGE_SIZE = 100  # the API rejects per_page > 100
 
+# The stats endpoint's `matchdays` filter takes Dunkest's own matchday id, not the
+# round number the site displays: ids run across every competition the platform
+# hosts, so competition 49 (EuroLeague 2026-27) starts at 1528 rather than at 1.
+# Passing a round number there answers 500, which is why this fetcher had never
+# stored a single round. Ids within one competition are contiguous, so only the
+# offset is needed and _matchday_offset() discovers it rather than trusting this
+# seed - it is a starting point for the search, not a fact.
+FANTASY_MATCHDAY_SEED_ID = 1528
+FANTASY_MATCHDAY_PROBE_SPAN = 200
+_MATCHDAY_OFFSETS = {}
+
 # Dunkest prices head coaches alongside players ("Head Coach" is a 4th position
 # value); the analytics only cover players, so anything outside this map is dropped.
 POSITION_MAP = {"Guard": "G", "Forward": "F", "Center": "C"}
@@ -63,6 +74,76 @@ def _competition_id(competition_id=None):
     return str(competition_id or os.environ.get("DUNKEST_COMPETITION_ID", "49"))
 
 
+def _fantasy_headers():
+    return {
+        "accept": "*/*",
+        "authorization": f"Bearer {_fantasy_token()}",
+        "content-type": "application/json",
+        # The API rejects requests that do not look like they came from the site.
+        "origin": FANTASY_ORIGIN,
+        "referer": f"{FANTASY_ORIGIN}/",
+    }
+
+
+def _fantasy_matchday(competition_id, matchday_id):
+    """
+    One matchday's fixture list, or None when no matchday has that id.
+
+    Reports `number` - the round as the site labels it - and every match's status,
+    which is the only way to tell a round that has been played from one that is
+    merely scheduled: the stats table answers 200 with an all-zero row per player
+    for both.
+    """
+    url = f"{FANTASY_API_BASE}/schedules/{competition_id}/matchdays/{matchday_id}"
+    response = requests.get(url, headers=_fantasy_headers(), timeout=20)
+    if response.status_code == 404:
+        return None
+    response.raise_for_status()
+    return (response.json() or {}).get("data") or None
+
+
+def _matchday_played(matchday):
+    """True once at least one of a matchday's games has been played."""
+    matches = [
+        match
+        for rnd in matchday.get("rounds") or []
+        for match in rnd.get("matches") or []
+    ]
+    return any(match.get("status") == "played" for match in matches)
+
+
+def _matchday_offset(competition_id):
+    """
+    What to add to a round number to get the matchday id the stats endpoint wants.
+
+    Probes outward from a known id until a matchday answers, then reads the offset
+    off that response - every matchday reports its own round number, so one hit
+    pins the whole mapping. Seeding the search with a real id keeps it to a single
+    request in the normal case, while the outward walk means next season's ids
+    resolve without a code change. Cached: the offset cannot move mid-run.
+    """
+    key = str(competition_id)
+    if key in _MATCHDAY_OFFSETS:
+        return _MATCHDAY_OFFSETS[key]
+
+    seed = int(os.environ.get("DUNKEST_MATCHDAY_SEED_ID") or FANTASY_MATCHDAY_SEED_ID)
+    for step in range(FANTASY_MATCHDAY_PROBE_SPAN + 1):
+        for candidate in sorted({seed + step, seed - step}):
+            if candidate < 1:
+                continue
+            number = (_fantasy_matchday(competition_id, candidate) or {}).get("number")
+            if number:
+                _MATCHDAY_OFFSETS[key] = candidate - int(number)
+                return _MATCHDAY_OFFSETS[key]
+
+    raise RuntimeError(
+        f"No matchday found for competition {competition_id} within "
+        f"{FANTASY_MATCHDAY_PROBE_SPAN} ids of {seed}. Set DUNKEST_MATCHDAY_SEED_ID "
+        "to any matchday id belonging to it (fantasy site -> Schedule -> DevTools -> "
+        "Network -> the schedules/{competition}/matchdays/{id} request)."
+    )
+
+
 def _fetch_fantasy_rows(competition_id, extra_params=None):
     """
     Page through the fantasy stats table and return one dict per player.
@@ -72,14 +153,7 @@ def _fetch_fantasy_rows(competition_id, extra_params=None):
     id is carried through as PlayerID, which is what lets stats and CR join
     exactly instead of by name.
     """
-    headers = {
-        "accept": "*/*",
-        "authorization": f"Bearer {_fantasy_token()}",
-        "content-type": "application/json",
-        # The API rejects requests that do not look like they came from the site.
-        "origin": FANTASY_ORIGIN,
-        "referer": f"{FANTASY_ORIGIN}/",
-    }
+    headers = _fantasy_headers()
     url = f"{FANTASY_API_BASE}/competitions/{competition_id}/stats/players/table"
 
     rows = []
@@ -135,10 +209,13 @@ def fetch_and_save_cr_data(competition_id=None, round_number=None):
     price history that nothing ever rewrites. utils/cr_history.py stitches those
     snapshots into the per-season series the Price Tracker chart reads.
 
-    round_number is how many rounds had been played when the prices were read, which
-    the API does not report - the caller knows it from the round fetch. It is left
-    blank when unknown rather than guessed; every snapshot written before this
-    existed has it blank too.
+    round_number is the highest round in the game log when the prices were read,
+    which the API does not report - the caller knows it from the round fetch. Note
+    that a round enters that log as soon as its first game is played, so on a game
+    day this is the round in progress rather than the last one to finish; the price
+    history dates its points from the schedule instead, and does not rely on this.
+    It is left blank when unknown rather than guessed; every snapshot written before
+    this existed has it blank too.
 
     Unlike the other fetchers this raises rather than returning an empty frame:
     CR is load-bearing for every endpoint, and swallowing the failure is what let
@@ -175,16 +252,18 @@ def fetch_and_save_cr_data(competition_id=None, round_number=None):
     return cr_df
 
 
-def _fantasy_round_frame(competition_id, round_number, season_label):
+def _fantasy_round_frame(competition_id, round_number, matchday_id, season_label):
     """
     Fetch one round's totals and shape them like a game log row per player.
 
     Each team plays once per regular-season round, so a round's totals are that
-    player's game. Returns an empty frame when the round has not been played.
+    player's game. round_number is what gets stored; matchday_id is what the API
+    filters on (see FANTASY_MATCHDAY_SEED_ID). Returns an empty frame when the
+    round has not been played.
     """
     rows = _fetch_fantasy_rows(
         competition_id,
-        {"stats_type": "tot", "matchdays": str(round_number)},
+        {"stats_type": "tot", "matchdays": str(matchday_id)},
     )
     if not rows:
         return pd.DataFrame()
@@ -257,32 +336,40 @@ def fetch_and_update_fantasy_stats(data_file, competition_id=None, season_label=
     )
     start_round = max(1, last_stored_round)
 
-    collected = []
-    consecutive_failures = 0
-    max_failures = 5
+    offset = _matchday_offset(competition_id)
 
+    collected = []
     for round_number in range(start_round, max_rounds + 1):
-        print(f"Fetching round; matchday={round_number}")
+        matchday_id = offset + round_number
+        matchday = _fantasy_matchday(competition_id, matchday_id)
+
+        # The fixture list, not the stats table, is what says a round is real and
+        # has been played - an unplayed round still returns a full table of zeros.
+        if matchday is None:
+            print(f"Round {round_number} is past the end of the fixture list. Stopping.")
+            break
+        if not _matchday_played(matchday):
+            print(f"Round {round_number} has not been played yet. Stopping.")
+            break
+
+        print(f"Fetching round {round_number} (matchday id {matchday_id})")
         try:
-            round_df = _fantasy_round_frame(competition_id, round_number, season_label)
+            round_df = _fantasy_round_frame(
+                competition_id, round_number, matchday_id, season_label
+            )
         except RuntimeError:
             # Auth/config problems are not "no data yet" - fail loudly.
             raise
         except Exception as e:
-            print(f"Error for round={round_number}: {e}")
-            consecutive_failures += 1
-            round_df = pd.DataFrame()
+            # Stop, but keep the rounds already collected: they are complete, and
+            # the next run resumes from the last stored round regardless.
+            print(f"Error for round={round_number}: {e}. Stopping.")
+            break
 
         if round_df.empty:
             print(f"No player data for round={round_number}.")
-            consecutive_failures += 1
         else:
-            consecutive_failures = 0
             collected.append(round_df)
-
-        if consecutive_failures >= max_failures:
-            print(f"Reached {max_failures} consecutive empty rounds. Stopping fetch.")
-            break
 
     if not collected:
         print("No new round data fetched.")
