@@ -8,6 +8,7 @@ import InfoTip from './InfoTip';
 import ColumnPicker from './ColumnPicker';
 import CrRangeSlider from './CrRangeSlider';
 import GamesWindowSelect from './GamesWindowSelect';
+import { SEASONS, CURRENT_SEASON } from '../seasons';
 import {
     COLUMNS, COLUMN_CATEGORIES, DEFAULT_COLUMN_IDS,
     columnKey, columnLabel, columnInfo, formatCell, shortName,
@@ -55,7 +56,7 @@ const Th = ({ label, sortKey, align = 'left', sortConfig, onSort, info, sticky }
 //   group   - 'core' is always visible, 'advanced' hides behind the toggle
 export default function StatsView() {
     const [filters, setFilters] = useState({
-        season: '2025',
+        season: CURRENT_SEASON,
         min_cr: 0,
         max_cr: 35,
         position: 'All'
@@ -274,10 +275,9 @@ export default function StatsView() {
                         onChange={handleSeasonChange}
                         className="input-dark bg-[#0a0a0c] min-w-[100px]"
                     >
-                        <option value="2026">2026-27</option>
-                        <option value="2025">2025-26</option>
-                        <option value="2024">2024-25</option>
-                        <option value="2023">2023-24</option>
+                        {SEASONS.map(s => (
+                            <option key={s.value} value={s.value}>{s.label}</option>
+                        ))}
                     </select>
                 </div>
 

@@ -13,8 +13,11 @@ from utils.data_fetchers import (
 )
 from utils.cr_history import rebuild_cr_history
 
-# The season the nightly fetch keeps up to date. Named rather than repeated so the
-# stats files, the schedule and the season label cannot drift apart.
+# The season the nightly fetch keeps up to date, and what every flag here assumes
+# when none is given. Named rather than repeated so the stats files, the schedule and
+# the season label cannot drift apart. Archive seasons are still reachable by naming
+# one explicitly - `--backfill 2025` - and nothing here ever rewrites their sources.
+# Mirrors DEFAULT_SEASON in main.py and CURRENT_SEASON in frontend/src/seasons.js.
 CURRENT_SEASON = "2026"
 
 
@@ -37,14 +40,15 @@ def _refuse_to_write_to_prod():
         sys.exit(2)
 
 
-def show_status(season="2025"):
+def show_status(season=CURRENT_SEASON):
     """
     Report what a season's stats file actually contains, without touching the API.
 
     Safe to run at any time, including while a backfill is in flight - it only reads
     the file that has been saved to S3 so far.
 
-        python run_dev_fetch.py --status 2025
+        python run_dev_fetch.py --status          # the current season
+        python run_dev_fetch.py --status 2025     # or any archive season
     """
     import pandas as pd
     from utils.s3_utils import load_from_s3
@@ -94,7 +98,7 @@ def show_status(season="2025"):
     return 0
 
 
-def run_backfill(season="2025"):
+def run_backfill(season=CURRENT_SEASON):
     """
     Fill in the full boxscore (minutes, shooting splits, plus-minus) for a season.
 
@@ -102,7 +106,8 @@ def run_backfill(season="2025"):
     roughly 75 consecutive requests, so one pass rarely covers a whole season. Each
     run picks up where the last left off and merges its results in.
 
-        python run_dev_fetch.py --backfill 2025
+        python run_dev_fetch.py --backfill        # the current season
+        python run_dev_fetch.py --backfill 2025   # or any archive season
     """
     data_file = f"player_stats_{season}.csv"
     season_code = f"E{season}"
@@ -204,11 +209,11 @@ if __name__ == "__main__":
 
     if "--status" in sys.argv:
         idx = sys.argv.index("--status")
-        season = sys.argv[idx + 1] if len(sys.argv) > idx + 1 else "2025"
+        season = sys.argv[idx + 1] if len(sys.argv) > idx + 1 else CURRENT_SEASON
         sys.exit(show_status(season))
     if "--backfill" in sys.argv:
         idx = sys.argv.index("--backfill")
-        season = sys.argv[idx + 1] if len(sys.argv) > idx + 1 else "2025"
+        season = sys.argv[idx + 1] if len(sys.argv) > idx + 1 else CURRENT_SEASON
         sys.exit(run_backfill(season))
     if "--schedule" in sys.argv:
         idx = sys.argv.index("--schedule")

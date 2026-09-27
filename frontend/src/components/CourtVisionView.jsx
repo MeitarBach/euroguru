@@ -8,6 +8,7 @@ import ChartCanvas from './charts/ChartCanvas';
 import ChartBuilderModal from './ChartBuilderModal';
 import CrRangeSlider from './CrRangeSlider';
 import GamesWindowSelect from './GamesWindowSelect';
+import { SEASONS, CURRENT_SEASON } from '../seasons';
 
 const CHARTS_STORAGE_KEY = 'euroguru.courtVision.charts';
 
@@ -71,7 +72,7 @@ const initialCharts = () => {
 };
 
 export default function CourtVisionView() {
-    const [filters, setFilters] = useState({ season: '2025', min_cr: 0, max_cr: 35, position: 'All' });
+    const [filters, setFilters] = useState({ season: CURRENT_SEASON, min_cr: 0, max_cr: 35, position: 'All' });
     const [options, setOptions] = useState({ positions: ['All'], min_cr_limit: 0, max_cr_limit: 35 });
     const [scoreMetric, setScoreMetric] = useState('PIR');
     const [loadedSeason, setLoadedSeason] = useState(null);
@@ -257,10 +258,9 @@ export default function CourtVisionView() {
                         onChange={(e) => setFilters(prev => ({ ...prev, season: e.target.value }))}
                         className="input-dark bg-[#0a0a0c] min-w-[100px]"
                     >
-                        <option value="2026">2026-27</option>
-                        <option value="2025">2025-26</option>
-                        <option value="2024">2024-25</option>
-                        <option value="2023">2023-24</option>
+                        {SEASONS.map(s => (
+                            <option key={s.value} value={s.value}>{s.label}</option>
+                        ))}
                     </select>
                 </div>
                 <GamesWindowSelect value={aggregation} onChange={setAggregation} />

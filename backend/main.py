@@ -98,12 +98,17 @@ DATA_FILES = {
     '2023': ['player_stats_2023.csv']
 }
 
+# What a request that names no season gets. The clients always send one, so this
+# only answers direct API calls - but it has to track the season the app opens on
+# (frontend/src/seasons.js), or the two disagree about what "the current season" is.
+DEFAULT_SEASON = '2026'
+
 # Dashboard "Consistent Elite" cut-off. Calibrated for PIR; re-tune once there is
 # real fantasy-points data to look at.
 ELITE_SCORE_THRESHOLD = 15
 
 
-def get_data(season='2025'):
+def get_data(season=DEFAULT_SEASON):
     candidates = DATA_FILES.get(season)
     if not candidates:
         raise HTTPException(status_code=404, detail="Season not found")
@@ -146,7 +151,7 @@ async def get_me(user=Depends(optional_user)):
     }
 
 @app.get("/api/filters")
-def get_filters(season: str = '2025'):
+def get_filters(season: str = DEFAULT_SEASON):
     df = get_data(season)
     if df.empty:
         return {"positions": [], "min_cr": 0, "max_cr": 0, "score_metric": "PIR"}
@@ -163,7 +168,7 @@ def get_filters(season: str = '2025'):
     }
 
 class FilterParams(BaseModel):
-    season: str = '2025'
+    season: str = DEFAULT_SEASON
     min_cr: float
     max_cr: float
     position: str
@@ -219,7 +224,7 @@ def get_aggregated_stats(params: FilterParams):
 
 
 @app.get("/api/player")
-def get_player_detail(name: str, season: str = '2025'):
+def get_player_detail(name: str, season: str = DEFAULT_SEASON):
     """
     One player's full profile: every game they played plus their season aggregates.
 
@@ -251,7 +256,7 @@ def get_player_detail(name: str, season: str = '2025'):
 
 
 @app.get("/api/cr-history")
-def get_cr_history(season: str = '2025'):
+def get_cr_history(season: str = DEFAULT_SEASON):
     """
     How every player's price moved through a season.
 
@@ -271,7 +276,7 @@ def get_cr_history(season: str = '2025'):
 
 
 class RecommendationParams(BaseModel):
-    season: str = '2025'
+    season: str = DEFAULT_SEASON
     min_cr: float
     max_cr: float
     last_x_games: int = 5
@@ -339,7 +344,7 @@ def _injury_records():
 
 
 @app.get("/api/dashboard")
-def get_dashboard_data(season: str = '2025'):
+def get_dashboard_data(season: str = DEFAULT_SEASON):
     from utils.data_processing import calculate_pir_stats
 
     # 1. Load Data

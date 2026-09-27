@@ -6,20 +6,13 @@ import { useOpenPlayer } from '../hooks/playerDetailContext';
 import usePriceTrend from '../hooks/usePriceTrend';
 import PriceTrend from './charts/PriceTrend';
 import SeasonNotStarted from './SeasonNotStarted';
-
 // The dashboard reports on the current season and falls back only when the user asks
-// it to. Named so the price history and the detail view cannot drift from the widgets.
-//
-// It used to be a lone constant pinned to the finished season, which quietly hid the
-// fact that the new one has no games yet. Pointing at the current season means the
-// page tells the truth about where we are, and SeasonNotStarted handles the stretch
-// between prices going up and the first tip-off.
-const CURRENT_SEASON = '2026';
-const PREVIOUS_SEASON = '2025';
-
-// Written out here as well as in CourtVisionView and RecommendationsView. A shared
-// seasons module is the tidy fix, and worth doing the next time one of those changes.
-const SEASON_LABEL = { '2026': '2026-27', '2025': '2025-26' };
+// it to. Shared with the other tabs so the price history, the detail view and the
+// widgets cannot drift apart - this page pointing at the current season while Stats,
+// Court Vision and Recommendations still opened on the finished one is exactly the
+// drift that list used to allow. SeasonNotStarted covers the stretch between prices
+// going up and the first tip-off.
+import { CURRENT_SEASON, PREVIOUS_SEASON, SEASON_LABEL } from '../seasons';
 
 // Rendered as plain elements rather than animated ones. A staggered entrance that
 // starts at opacity 0 leaves the widgets blank whenever the animation frames do not
