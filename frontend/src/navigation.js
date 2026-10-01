@@ -1,7 +1,7 @@
-import { LayoutDashboard, Users, TrendingUp, ScatterChart } from 'lucide-react';
+import { LayoutDashboard, Users, TrendingUp, ScatterChart, Radio } from 'lucide-react';
 
 /**
- * The app's four destinations, defined once.
+ * The app's destinations, defined once.
  *
  * Two components render this now - the desktop sidebar and the mobile tab bar - and a
  * second copy would eventually disagree with the first about a label or an id.
@@ -14,6 +14,7 @@ import { LayoutDashboard, Users, TrendingUp, ScatterChart } from 'lucide-react';
  */
 export const NAV_ITEMS = [
     { id: 'dashboard', label: 'Dashboard', short: 'Home', icon: LayoutDashboard },
+    { id: 'live', label: 'Live', short: 'Live', icon: Radio },
     { id: 'stats', label: 'Player Stats', short: 'Players', icon: Users, gated: true },
     { id: 'viz', label: 'Court Vision', short: 'Charts', icon: ScatterChart, gated: true },
     { id: 'recs', label: 'Recommendations', short: 'Picks', icon: TrendingUp, gated: true },

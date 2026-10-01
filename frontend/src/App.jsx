@@ -7,11 +7,20 @@ import StatsView from './components/StatsView';
 import DashboardView from './components/DashboardView';
 import RecommendationsView from './components/RecommendationsView';
 import CourtVisionView from './components/CourtVisionView';
+import LiveView from './components/LiveView';
 import { PlayerDetailProvider } from './hooks/usePlayerDetail';
 import { AuthProvider } from './hooks/useAuth';
 
 function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
+  // Live is the one view that stays mounted once opened: it polls the games, and its
+  // feed and sparklines are built up over the evening, so leaving it for the stats
+  // table and coming back should not start it over.
+  const [liveMounted, setLiveMounted] = useState(false);
+  const selectTab = (tab) => {
+    if (tab === 'live') setLiveMounted(true);
+    setActiveTab(tab);
+  };
 
   return (
     // AuthProvider is outermost because the sidebar and the header both read the
@@ -23,7 +32,7 @@ function App() {
         and a view unmounting on a tab switch must not take the modal with it. */}
     <PlayerDetailProvider>
       <div className="min-h-screen bg-[#050507] text-white flex">
-        <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
+        <Sidebar activeTab={activeTab} setActiveTab={selectTab} />
 
         {/* min-w-0 is load-bearing. A flex item defaults to min-width:auto, so it
             refuses to shrink below its content: a wide stats table stretched this
@@ -40,6 +49,12 @@ function App() {
           <div className="p-4 md:p-8">
             {activeTab === 'dashboard' && <DashboardView />}
 
+            {liveMounted && (
+              <div hidden={activeTab !== 'live'}>
+                <LiveView />
+              </div>
+            )}
+
             {activeTab === 'stats' && <StatsView />}
 
             {activeTab === 'viz' && <CourtVisionView />}
@@ -48,7 +63,7 @@ function App() {
           </div>
         </main>
 
-        <MobileNav activeTab={activeTab} setActiveTab={setActiveTab} />
+        <MobileNav activeTab={activeTab} setActiveTab={selectTab} />
       </div>
     </PlayerDetailProvider>
     <Analytics />

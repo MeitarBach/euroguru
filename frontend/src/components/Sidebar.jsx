@@ -2,9 +2,12 @@ import React from 'react';
 import { LogOut, LogIn, Lock } from 'lucide-react';
 import { NAV_ITEMS } from '../navigation';
 import { useAuth, useGate, initialsFor } from '../hooks/authContext';
+import useGameOn from '../hooks/useGameOn';
+import LiveDot from './live/LiveDot';
 
 export default function Sidebar({ activeTab, setActiveTab }) {
     const { locked } = useGate();
+    const gameOn = useGameOn();
     // Opaque, and above the page, rather than the glass-panel it used to be. A 3%-white
     // background is fine for a card sitting on the page, but not for fixed chrome that
     // content can pass beneath: anything scrolled under the sidebar stayed visible
@@ -49,6 +52,9 @@ export default function Sidebar({ activeTab, setActiveTab }) {
                         >
                             <Icon size={20} />
                             {item.label}
+                            {item.id === 'live' && gameOn && (
+                                <span className="ml-auto" title="A game is on"><LiveDot /></span>
+                            )}
                             {locked && item.gated && (
                                 <Lock size={12} className="ml-auto text-gray-600" aria-label="Preview until you sign in" />
                             )}

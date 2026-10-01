@@ -148,3 +148,18 @@ body {
 .range-dual input[type="range"]::-moz-range-track {
   background: none;
 }
+
+/* Live tab: a score that just moved glows in the direction it moved, then settles. */
+@keyframes live-flash-up {
+  0%, 25% { color: #34d399; text-shadow: 0 0 22px rgba(52, 211, 153, 0.55); }
+  100% { text-shadow: none; }
+}
+@keyframes live-flash-down {
+  0%, 25% { color: #f87171; text-shadow: 0 0 22px rgba(248, 113, 113, 0.5); }
+  100% { text-shadow: none; }
+}
+.live-flash-up { animation: live-flash-up 1.6s ease-out; }
+.live-flash-down { animation: live-flash-down 1.6s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .live-flash-up, .live-flash-down { animation: none; }
+}
