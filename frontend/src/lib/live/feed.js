@@ -75,6 +75,15 @@ export function parseHeader(header) {
     if (status === 'live' && clock === '00:00' && quarter) {
         label = quarter === 2 ? 'Half-time' : `End of ${periodLabel(quarter)}`;
     }
+    // Between periods the feed blanks Quarter, leaving only the game time elapsed to
+    // say which one just ended: 10:00 is the end of Q1, 40:00 of regulation, and each
+    // overtime adds five minutes.
+    const elapsed = /^(\d+):\d{2}$/.exec(String(header.GameTime ?? '').trim());
+    if (status === 'live' && !quarter && elapsed && Number(elapsed[1]) > 0) {
+        const minutes = Number(elapsed[1]);
+        const ended = minutes <= 40 ? Math.round(minutes / 10) : 4 + Math.round((minutes - 40) / 5);
+        label = ended === 2 ? 'Half-time' : `End of ${periodLabel(ended)}`;
+    }
 
     return {
         status,
