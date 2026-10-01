@@ -58,13 +58,14 @@ function indexLines(lines, rosterByCode) {
  * The live state of one round, polled from `source`.
  *
  * Polls only what is needed: a game's header once it is near tip-off, its boxscore only
- * while a watched player is in it, and a finished game exactly once. Slows down while
+ * while a watched player is in it or it is open in the game view (`focusCode`), and a
+ * finished game exactly once. Slows down while
  * the page is hidden and catches up the moment it is shown again; backs off on failures.
  *
  * Also turns successive boxscores into a feed of events and an FPT history per watched
  * player, both kept in sessionStorage so a reload mid-game keeps them.
  */
-export default function useLiveRound({ source, seasonCode, roster, watchKeys, onEvents }) {
+export default function useLiveRound({ source, seasonCode, roster, watchKeys, onEvents, focusCode = null }) {
     const [schedule, setSchedule] = useState(null);
     const [scheduleError, setScheduleError] = useState(null);
     const [gameStates, setGameStates] = useState({});
@@ -116,7 +117,7 @@ export default function useLiveRound({ source, seasonCode, roster, watchKeys, on
     // has to restart when a player is added or the roster lands.
     const live = useRef({});
     useEffect(() => {
-        live.current = { ...live.current, source, games, rosterByCode, watchedCodes, watchKeys, onEvents };
+        live.current = { ...live.current, source, games, rosterByCode, watchedCodes, watchKeys, onEvents, focusCode };
     });
 
     // Restore this round's feed and sparklines from earlier in the session.
@@ -149,7 +150,9 @@ export default function useLiveRound({ source, seasonCode, roster, watchKeys, on
         let failures = 0;
 
         const tick = async () => {
-            const { source: src, games: roundGames, rosterByCode: rosters, watchedCodes: codes, watchKeys: keys } = live.current;
+            const {
+                source: src, games: roundGames, rosterByCode: rosters, watchedCodes: codes, watchKeys: keys, focusCode: focus,
+            } = live.current;
             const prevStates = live.current.states ?? {};
             const now = Date.now();
             const watching = new Set(keys);
@@ -157,7 +160,8 @@ export default function useLiveRound({ source, seasonCode, roster, watchKeys, on
             const due = roundGames.filter(g => now >= g.tipoff - NEAR_TIPOFF_MS);
             const results = await Promise.allSettled(due.map(async (game) => {
                 const prev = prevStates[game.code];
-                const watched = codes.has(game.homeCode) || codes.has(game.awayCode);
+                // The game open in the game view needs its boxscore too, watched or not.
+                const watched = codes.has(game.homeCode) || codes.has(game.awayCode) || game.code === focus;
                 if (prev?.status === 'final' && (prev.byKey || !watched)) return null;
 
                 const header = prev?.status === 'final' ? prev : await src.header(game);
@@ -192,6 +196,8 @@ export default function useLiveRound({ source, seasonCode, roster, watchKeys, on
                     clock: header.clock ?? null,
                     lastModified: Math.max(header.lastModified ?? 0, box?.lastModified ?? 0) || null,
                     byKey,
+                    // Every line, priced or not: the game view lists the whole game.
+                    lines: box ? box.lines : prev?.lines,
                 };
                 states[game.code] = next;
 
@@ -311,6 +317,8 @@ export default function useLiveRound({ source, seasonCode, roster, watchKeys, on
     // rather than at the next scheduled poll.
     const watchSignature = watchKeys.join('|');
     useEffect(() => { wake.current(); }, [watchSignature]);
+    // Opening a game in the game view fetches it at once, too.
+    useEffect(() => { wake.current(); }, [focusCode]);
 
     const roundGames = useMemo(
         () => games.map(g => ({ ...g, status: 'scheduled', ...gameStates[g.code] })),

@@ -18,6 +18,7 @@ import WatchCard from './live/WatchCard';
 import { GroupBoard, GroupHeader } from './live/GroupBoard';
 import ActivityFeed from './live/ActivityFeed';
 import LivePicker from './live/LivePicker';
+import GameView from './live/GameView';
 import LiveDot from './live/LiveDot';
 
 const SEASON_CODE = `E${CURRENT_SEASON}`;
@@ -131,6 +132,8 @@ export default function LiveView() {
     const [source] = useState(() => (demo ? demoSource(SEASON_CODE) : euroleagueSource(SEASON_CODE)));
     const [roster, setRoster] = useState(null);
     const [picker, setPicker] = useState({ open: false, game: null });
+    // The game open in the game view, by code - its boxscore is polled while it is.
+    const [openGame, setOpenGame] = useState(null);
     const [sound, setSound] = useState(loadSound);
     const now = useNow(1000);
     const watch = useWatchGroups();
@@ -175,6 +178,7 @@ export default function LiveView() {
         roster,
         watchKeys: watch.allKeys,
         onEvents,
+        focusCode: openGame,
     });
 
     const rosterByKey = useMemo(() => new Map((roster ?? []).map(p => [p.PlayerKey, p])), [roster]);
@@ -303,7 +307,7 @@ export default function LiveView() {
 
             {!loading && (
                 <>
-                    <GameStrip games={live.games} now={now} onPick={openPicker} />
+                    <GameStrip games={live.games} now={now} onOpen={(game) => setOpenGame(game.code)} />
 
                     <div className="grid grid-cols-1 xl:grid-cols-3 gap-5 items-start">
                         {/* On a phone the scoreboard leads; on a wide screen it moves to the side. */}
@@ -368,6 +372,18 @@ export default function LiveView() {
                         </aside>
                     </div>
                 </>
+            )}
+
+            {openGame !== null && roster && live.games.some(g => g.code === openGame) && (
+                <GameView
+                    game={live.games.find(g => g.code === openGame)}
+                    roster={roster}
+                    groups={groups}
+                    watch={watch}
+                    now={now}
+                    onClose={() => setOpenGame(null)}
+                    onOpenPlayer={(name) => openPlayer(name, CURRENT_SEASON)}
+                />
             )}
 
             {picker.open && roster && (

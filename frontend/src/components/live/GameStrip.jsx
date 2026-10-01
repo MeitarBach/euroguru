@@ -32,8 +32,8 @@ function TeamRow({ code, score, win, show }) {
     );
 }
 
-/** The round's games in one scrollable row, grouped by day. */
-export default function GameStrip({ games, now, onPick }) {
+/** The round's games in one scrollable row, grouped by day. A chip opens its game. */
+export default function GameStrip({ games, now, onOpen }) {
     return (
         <div className="flex gap-2.5 overflow-x-auto pb-1 -mx-4 px-4 md:mx-0 md:px-0 snap-x">
             {games.map((game, i) => {
@@ -53,8 +53,8 @@ export default function GameStrip({ games, now, onPick }) {
                         )}
                         <button
                             type="button"
-                            onClick={() => onPick(game)}
-                            title="Add players from this game"
+                            onClick={() => onOpen(game)}
+                            title="Open this game"
                             className={`shrink-0 snap-start w-[150px] rounded-xl border px-3 py-2.5 text-left text-sm transition-colors
                                 ${game.status === 'live'
                                     ? 'border-red-500/40 bg-red-500/[0.06] hover:bg-red-500/10'
