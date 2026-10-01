@@ -11,8 +11,8 @@ function When({ event }) {
     return <span className="text-[10px] text-gray-600 font-mono shrink-0 w-14 pt-0.5">{clock || at}</span>;
 }
 
-/** What just happened to your players, newest first. */
-export default function ActivityFeed({ events, nameOf }) {
+/** What just happened to your players, newest first, dotted with the groups they are in. */
+export default function ActivityFeed({ events, nameOf, groupsOf }) {
     return (
         <div className="glass-panel p-4">
             <h3 className="font-semibold text-gray-200 flex items-center gap-2 mb-3">
@@ -37,7 +37,15 @@ export default function ActivityFeed({ events, nameOf }) {
                                 <When event={event} />
                                 {event.kind === 'player' ? (
                                     <span className="min-w-0 flex-1 text-gray-300">
-                                        <span className="text-white font-medium">{surnameOf(nameOf(event.key))}</span>{' '}
+                                        <span className="text-white font-medium">{surnameOf(nameOf(event.key))}</span>
+                                        {groupsOf(event.key).map(g => (
+                                            <span
+                                                key={g.id}
+                                                title={g.name}
+                                                className="inline-block w-1.5 h-1.5 rounded-full ml-1 align-middle"
+                                                style={{ background: g.colorHex }}
+                                            />
+                                        ))}{' '}
                                         <span className="text-gray-400">{event.parts.join(' · ') || 'stat correction'}</span>
                                     </span>
                                 ) : (

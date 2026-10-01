@@ -19,7 +19,7 @@ const SETTINGS_FIELDS = {
     'euroguru.visibleColumns': 'statsColumns',
     'euroguru.recommendationColumns': 'recColumns',
     'euroguru.recommendationWeights': 'recWeights',
-    'euroguru.liveWatchlist': 'liveWatchlist',
+    'euroguru.liveGroups': 'liveGroups',
 };
 const CHARTS_KEY = 'euroguru.courtVision.charts';
 

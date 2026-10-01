@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Radio, UserPlus, Volume2, VolumeX, FlaskConical, Plus, RefreshCw } from 'lucide-react';
 import { fetchStats } from '../services/api';
 import { CURRENT_SEASON } from '../seasons';
-import useWatchlist from '../hooks/useWatchlist';
+import useWatchGroups, { GROUP_COLORS } from '../hooks/useWatchGroups';
 import useLiveRound from '../hooks/useLiveRound';
 import useNow from '../hooks/useNow';
 import { useOpenPlayer } from '../hooks/playerDetailContext';
@@ -14,7 +14,7 @@ import { chime, enableChime } from '../lib/live/chime';
 import { euroleagueCode } from '../lib/live/teams';
 import GameStrip from './live/GameStrip';
 import WatchCard from './live/WatchCard';
-import TotalCard from './live/TotalCard';
+import { GroupBoard, GroupHeader } from './live/GroupBoard';
 import ActivityFeed from './live/ActivityFeed';
 import LivePicker from './live/LivePicker';
 import LiveDot from './live/LiveDot';
@@ -76,15 +76,16 @@ function Freshness({ connection, games, now }) {
     );
 }
 
-function EmptyState({ suggestions, onAdd, onPick }) {
+function EmptyState({ group, suggestions, onAdd, onPick }) {
     return (
         <div className="glass-panel p-6 sm:p-8 text-center">
             <div className="mx-auto mb-3 w-12 h-12 rounded-full flex items-center justify-center bg-purple-500/15 border border-purple-500/30 text-purple-300">
                 <Radio size={22} />
             </div>
-            <h3 className="text-lg font-semibold text-white">Pick the players you want to follow</h3>
+            <h3 className="text-lg font-semibold text-white">Who's in {group.name}?</h3>
             <p className="mt-1 text-sm text-gray-400 max-w-md mx-auto">
-                Their fantasy points update live while they play, with every basket, board and turnover as it happens.
+                Add the players on this roster. Their fantasy points update live while they play, and the
+                group's total moves with every basket, board and turnover. Make a group for each team in your league.
             </p>
             <button
                 type="button"
@@ -129,7 +130,7 @@ export default function LiveView() {
     const [picker, setPicker] = useState({ open: false, game: null });
     const [sound, setSound] = useState(loadSound);
     const now = useNow(1000);
-    const watch = useWatchlist();
+    const watch = useWatchGroups();
     const openPlayer = useOpenPlayer();
 
     useEffect(() => {
@@ -169,16 +170,24 @@ export default function LiveView() {
         source,
         seasonCode: demo ? `${SEASON_CODE}-demo` : SEASON_CODE,
         roster,
-        watchKeys: watch.keys,
+        watchKeys: watch.allKeys,
         onEvents,
     });
 
     const rosterByKey = useMemo(() => new Map((roster ?? []).map(p => [p.PlayerKey, p])), [roster]);
-    const rows = useMemo(
-        () => sortRows(watch.keys.map(k => rosterByKey.get(k)).filter(Boolean).map(p => watchRow(p, live.games))),
-        [watch.keys, rosterByKey, live.games],
-    );
-    const sums = useMemo(() => totals(rows), [rows]);
+    // One row per followed player, shared by every group they are in.
+    const rowByKey = useMemo(() => new Map(
+        watch.allKeys
+            .map(k => rosterByKey.get(k))
+            .filter(Boolean)
+            .map(p => [p.PlayerKey, watchRow(p, live.games)]),
+    ), [watch.allKeys, rosterByKey, live.games]);
+    const groups = useMemo(() => watch.groups.map(g => {
+        const rows = sortRows(g.keys.map(k => rowByKey.get(k)).filter(Boolean));
+        return { ...g, colorHex: GROUP_COLORS[g.color % GROUP_COLORS.length], rows, sums: totals(rows) };
+    }), [watch.groups, rowByKey]);
+    const group = groups.find(g => g.id === watch.selected.id) ?? groups[0];
+    const groupsOf = useCallback((key) => groups.filter(g => g.keys.includes(key)), [groups]);
     const lastEvent = useMemo(() => {
         const latest = new Map();
         for (const e of live.events) if (e.kind === 'player' && !latest.has(e.key)) latest.set(e.key, e);
@@ -195,16 +204,27 @@ export default function LiveView() {
     const suggestions = useMemo(() => {
         const playing = new Set(live.games.filter(g => g.status !== 'final').flatMap(g => [g.homeCode, g.awayCode]));
         return (roster ?? [])
-            .filter(p => playing.has(euroleagueCode(p)) && typeof p.Average_Score === 'number')
+            .filter(p => playing.has(euroleagueCode(p)) && typeof p.Average_Score === 'number' && !group.keys.includes(p.PlayerKey))
             .sort((a, b) => b.Average_Score - a.Average_Score)
             .slice(0, 8);
-    }, [roster, live.games]);
+    }, [roster, live.games, group.keys]);
 
     const nameOf = useCallback((key) => rosterByKey.get(key)?.PlayerName ?? 'Player', [rosterByKey]);
     const openPicker = (game = null) => setPicker({ open: true, game });
     const closePicker = useCallback(() => setPicker({ open: false, game: null }), []);
 
     const loading = live.status === 'loading' || roster === null;
+
+    const board = (
+        <GroupBoard
+            round={live.round}
+            groups={groups}
+            selectedId={group.id}
+            onSelect={watch.select}
+            // A new group is empty by definition, so go straight to filling it.
+            onCreate={(name) => { watch.create(name); openPicker(); }}
+        />
+    );
 
     return (
         <div className="space-y-5">
@@ -248,7 +268,7 @@ export default function LiveView() {
                     >
                         <UserPlus size={16} /> Add players
                         {watch.limit && (
-                            <span className="text-[11px] text-purple-200/80">{watch.keys.length}/{watch.limit}</span>
+                            <span className="text-[11px] text-purple-200/80">{watch.allKeys.length}/{watch.limit}</span>
                         )}
                     </button>
                 </div>
@@ -277,34 +297,48 @@ export default function LiveView() {
                 <>
                     <GameStrip games={live.games} now={now} onPick={openPicker} />
 
-                    {rows.length === 0 ? (
-                        <EmptyState suggestions={suggestions} onAdd={watch.add} onPick={() => openPicker()} />
-                    ) : (
-                        <div className="grid grid-cols-1 xl:grid-cols-3 gap-5 items-start">
-                            <div className="xl:hidden">
-                                <TotalCard round={live.round} sums={sums} />
-                            </div>
-                            <div className="xl:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-3">
-                                {rows.map(row => (
-                                    <WatchCard
-                                        key={row.key}
-                                        row={row}
-                                        history={live.history[row.key]}
-                                        lastEvent={lastEvent.get(row.key)}
-                                        now={now}
-                                        onRemove={() => watch.remove(row.key)}
-                                        onOpen={() => openPlayer(row.player.PlayerName, CURRENT_SEASON)}
-                                    />
-                                ))}
-                            </div>
-                            <aside className="space-y-4">
-                                <div className="hidden xl:block">
-                                    <TotalCard round={live.round} sums={sums} />
+                    <div className="grid grid-cols-1 xl:grid-cols-3 gap-5 items-start">
+                        {/* On a phone the scoreboard leads; on a wide screen it moves to the side. */}
+                        <div className="xl:hidden">{board}</div>
+
+                        <section className="xl:col-span-2 space-y-3">
+                            <GroupHeader
+                                key={group.id}
+                                group={group}
+                                canDelete={groups.length > 1}
+                                onRename={(name) => watch.rename(group.id, name)}
+                                onDelete={() => watch.destroy(group.id)}
+                            />
+                            {group.rows.length === 0 ? (
+                                <EmptyState
+                                    group={group}
+                                    suggestions={suggestions}
+                                    onAdd={(key) => watch.add(group.id, key)}
+                                    onPick={() => openPicker()}
+                                />
+                            ) : (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-3 gap-2">
+                                    {group.rows.map(row => (
+                                        <WatchCard
+                                            key={row.key}
+                                            row={row}
+                                            history={live.history[row.key]}
+                                            lastEvent={lastEvent.get(row.key)}
+                                            now={now}
+                                            alsoIn={groupsOf(row.key).filter(g => g.id !== group.id)}
+                                            onRemove={() => watch.remove(group.id, row.key)}
+                                            onOpen={() => openPlayer(row.player.PlayerName, CURRENT_SEASON)}
+                                        />
+                                    ))}
                                 </div>
-                                <ActivityFeed events={live.events} nameOf={nameOf} />
-                            </aside>
-                        </div>
-                    )}
+                            )}
+                        </section>
+
+                        <aside className="space-y-4">
+                            <div className="hidden xl:block">{board}</div>
+                            <ActivityFeed events={live.events} nameOf={nameOf} groupsOf={groupsOf} />
+                        </aside>
+                    </div>
                 </>
             )}
 
@@ -314,6 +348,7 @@ export default function LiveView() {
                     games={live.games}
                     focusGame={picker.game}
                     watch={watch}
+                    group={group}
                     round={live.round}
                     teamNames={teamNames}
                     now={now}

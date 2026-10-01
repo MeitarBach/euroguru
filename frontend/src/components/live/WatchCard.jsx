@@ -15,214 +15,163 @@ const BUBBLE_MS = 4000;
 const GLOW_MS = 2500;
 const BIG_PLAY = 3;
 
-function StatusBadge({ row, now }) {
+/** Where the player's game is: "Q3 04:12", "Final W 81–80", "19:00 · in 2h". */
+function GameNote({ row, now }) {
     const { state, game } = row;
-    if (state === 'live' || state === 'bench' || state === 'waiting') {
-        return (
-            <span className="flex items-center gap-1.5 text-[11px] font-semibold text-red-300">
-                <LiveDot /> {[game.period, game.clock].filter(Boolean).join(' ') || 'Live'}
-            </span>
-        );
+    if (['live', 'bench', 'waiting'].includes(state)) {
+        return <span className="text-red-300">{[game.period, game.clock].filter(Boolean).join(' ') || 'Live'}</span>;
     }
-    if (state === 'final' || state === 'dnp' || state === 'out') {
-        const result = row.mine > row.theirs ? 'W' : 'L';
+    if (['final', 'dnp', 'out'].includes(state)) {
+        const won = row.mine > row.theirs;
         return (
-            <span className="text-[11px] font-semibold text-gray-500">
-                FINAL <span className={result === 'W' ? 'text-emerald-400' : 'text-gray-500'}>{result} {row.mine}–{row.theirs}</span>
+            <span>
+                Final <span className={won ? 'text-emerald-400' : ''}>{won ? 'W' : 'L'} {row.mine}–{row.theirs}</span>
             </span>
         );
     }
     if (state === 'upcoming') {
-        return <span className="text-[11px] text-gray-400">{whenLabel(game.tipoff, now)}</span>;
+        const until = game.tipoff - now;
+        return <span>{whenLabel(game.tipoff, now)}{until > 0 && until < 6 * 3_600_000 ? ` · in ${countdown(until)}` : ''}</span>;
     }
-    return <span className="text-[11px] text-gray-600">No game</span>;
+    return <span>No game this round</span>;
 }
 
-function Stat({ value, label, tone = '' }) {
-    return (
-        <span className={value ? tone || 'text-gray-200' : 'text-gray-600'}>
-            <span className="font-mono tabular-nums">{value}</span> {label}
-        </span>
-    );
-}
-
+/** The counting stats that are not zero, then minutes and (when they matter) fouls. */
 function StatLine({ line }) {
-    const fouls = line.pf >= 5 ? 'text-red-400' : line.pf >= 4 ? 'text-amber-300' : '';
+    const parts = [['pts', 'PTS'], ['reb', 'REB'], ['ast', 'AST'], ['stl', 'STL'], ['blk', 'BLK'], ['tov', 'TO']]
+        .filter(([stat]) => line[stat])
+        .map(([stat, label]) => (
+            <span key={stat} className={stat === 'tov' ? 'text-orange-300/90' : 'text-gray-300'}>
+                <span className="font-mono tabular-nums">{line[stat]}</span> {label}
+            </span>
+        ));
     return (
-        <div className="mt-3 space-y-1 text-xs">
-            <div className="flex flex-wrap gap-x-2.5 gap-y-1">
-                <Stat value={line.pts} label="PTS" />
-                <Stat value={line.reb} label="REB" />
-                <Stat value={line.ast} label="AST" />
-                <Stat value={line.stl} label="STL" />
-                <Stat value={line.blk} label="BLK" />
-                <Stat value={line.tov} label="TO" tone="text-orange-300" />
-            </div>
-            <div className="flex flex-wrap gap-x-2.5 gap-y-1 text-gray-500">
-                <span><span className="font-mono tabular-nums text-gray-300">{line.min}</span> MIN</span>
-                <span className={fouls}>
-                    <span className="font-mono tabular-nums">{line.pf}</span> PF{line.pf >= 5 ? ' · fouled out' : ''}
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-gray-500 min-w-0">
+            {parts.length ? parts : <span>0 PTS</span>}
+            <span>· <span className="font-mono tabular-nums">{line.min}</span></span>
+            {line.pf >= 3 && (
+                <span className={line.pf >= 5 ? 'text-red-400' : line.pf >= 4 ? 'text-amber-300' : ''}>
+                    · {line.pf} PF{line.pf >= 5 ? ' (out)' : ''}
                 </span>
-                <span>
-                    <span className="font-mono tabular-nums text-gray-300">{line.fgm2 + line.fgm3}/{line.fga2 + line.fga3}</span> FG
-                </span>
-                <span><span className="font-mono tabular-nums text-gray-300">{signed(line.pm).replace('.0', '')}</span> ±</span>
-            </div>
+            )}
         </div>
     );
 }
 
-/** How the score compares with the player's season average. */
-function PaceBar({ score, avg }) {
-    if (!avg || avg <= 0 || score === null) return null;
-    const ratio = Math.max(0, Math.min(1.5, score / avg));
-    const ahead = score >= avg;
-    return (
-        <div className="mt-3">
-            <div className="h-1 rounded-full bg-white/5 overflow-hidden">
-                <div
-                    className={`h-full rounded-full transition-[width] duration-700 ${ahead ? 'bg-emerald-400/80' : 'bg-purple-400/70'}`}
-                    style={{ width: `${(ratio / 1.5) * 100}%` }}
-                />
-            </div>
-            <div className="mt-1 text-[10px] text-gray-500">
-                season avg <span className="font-mono text-gray-400">{avg.toFixed(1)}</span>
-                {ahead && <span className="text-emerald-400"> · beating it</span>}
-            </div>
-        </div>
-    );
-}
-
-function Placeholder({ row, now }) {
-    const { state, game, avg } = row;
-    const text = {
-        upcoming: game && `Tip-off ${whenLabel(game.tipoff, now)} · in ${countdown(game.tipoff - now)}`,
-        bench: 'On the bench - yet to play',
-        waiting: 'Game on - reading the boxscore',
-        out: 'Not in the squad tonight',
-        dnp: 'Did not play',
-        nogame: 'No game this round',
-    }[state];
-    return (
-        <div className="mt-3">
-            <div className="flex items-baseline gap-1.5 text-gray-600">
-                <span className="text-4xl font-bold font-mono">–</span>
-                {avg !== null && <span className="text-xs">avg {avg.toFixed(1)} FPT</span>}
-            </div>
-            <div className="mt-1 text-xs text-gray-500">{text}</div>
-        </div>
-    );
-}
+const PLACEHOLDER = {
+    bench: 'On the bench, yet to play',
+    waiting: 'Game on, reading the boxscore',
+    out: 'Not in the squad',
+    dnp: 'Did not play',
+};
 
 /**
- * One watched player, live.
+ * One followed player, live - compact enough that a phone shows several at once.
  *
  * Everything that moves does so in the direction of the news: the number counts to its
- * new value and flashes, a "+2.0" floats up off it, and a big play rings the card. The
- * card itself glides when the order changes, so a player overtaking another reads as
- * a move rather than as the list jumping.
+ * new value and flashes, a "+2.0" floats off it, and a big play rings the card. The card
+ * glides when the order changes, so an overtake reads as a move, not as a jump.
  */
-export default function WatchCard({ row, history, lastEvent, now, onRemove, onOpen }) {
+export default function WatchCard({ row, history, lastEvent, now, onRemove, onOpen, alsoIn = [] }) {
     const { player, line, state, score, pending, bonus } = row;
-    const scored = score !== null;
     const recent = lastEvent && now - lastEvent.at < BUBBLE_MS ? lastEvent : null;
     const glowing = recent && Math.abs(recent.delta) >= BIG_PLAY && now - recent.at < GLOW_MS;
     const points = history ?? [];
+    const live = state === 'live';
+    const injury = player.InjuryStatus
+        ? (String(player.InjuryStatus).toUpperCase().startsWith('OUT') ? 'OUT' : 'GTD')
+        : null;
 
     return (
         <MotionDiv
             layout
             transition={{ type: 'spring', stiffness: 420, damping: 38 }}
-            className={`glass-panel p-4 relative overflow-hidden transition-shadow duration-500 ${
-                glowing ? 'ring-2 ring-emerald-400/50 shadow-[0_0_32px_-8px_rgba(52,211,153,0.55)]' : ''}`}
+            className={`group relative rounded-xl border px-3 py-2.5 bg-[#ffffff05] transition-shadow duration-500
+                ${live ? 'border-red-500/25' : 'border-white/5'}
+                ${glowing ? 'ring-2 ring-emerald-400/50 shadow-[0_0_28px_-8px_rgba(52,211,153,0.55)]' : ''}`}
         >
-            {state === 'live' && <span className="absolute inset-y-0 left-0 w-0.5 bg-red-500/70" />}
-
-            <div className="flex items-start justify-between gap-2">
-                <button type="button" onClick={onOpen} className="min-w-0 text-left group">
-                    <div className="flex items-center gap-2">
-                        {state === 'live' && (line?.onCourt
+            <div className="flex items-start gap-2.5">
+                <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                        {live && (line?.onCourt
                             ? <span title="On the court"><LiveDot color="green" /></span>
                             : <span title="On the bench" className="h-2 w-2 rounded-full bg-gray-600 shrink-0" />)}
-                        <span className="font-semibold text-white truncate group-hover:text-purple-200 transition-colors">
+                        <button
+                            type="button"
+                            onClick={onOpen}
+                            className="text-sm font-semibold text-white truncate hover:text-purple-200 transition-colors"
+                        >
                             {player.PlayerName}
-                        </span>
-                        {player.InjuryStatus && (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-300 border border-red-500/20 shrink-0">
-                                {String(player.InjuryStatus).toUpperCase().startsWith('OUT') ? 'OUT' : 'GTD'}
-                            </span>
-                        )}
+                        </button>
+                        {injury && <span className="text-[9px] px-1 rounded bg-red-500/15 text-red-300 shrink-0">{injury}</span>}
+                        {alsoIn.map(g => (
+                            <span key={g.id} title={`Also in ${g.name}`} className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: g.color }} />
+                        ))}
                     </div>
-                    <div className="text-xs text-gray-500 mt-0.5 truncate">
-                        {player.position} · {row.code}
-                        {row.opp && <> {row.home ? 'vs' : '@'} {row.opp}</>}
-                        {state === 'live' && line && (line.onCourt ? ' · on court' : ' · bench')}
+                    <div className="text-[11px] text-gray-500 truncate">
+                        {player.position} · {row.code}{row.opp && <> {row.home ? 'vs' : '@'} {row.opp}</>} · <GameNote row={row} now={now} />
                     </div>
-                </button>
-                <div className="flex items-center gap-1 shrink-0">
-                    <StatusBadge row={row} now={now} />
-                    <button
-                        type="button"
-                        onClick={onRemove}
-                        aria-label={`Stop watching ${player.PlayerName}`}
-                        className="p-1.5 -m-0.5 rounded-lg text-gray-600 hover:text-white hover:bg-[#ffffff0a] transition-colors"
-                    >
-                        <X size={14} />
-                    </button>
                 </div>
+
+                <div className="relative text-right shrink-0">
+                    <AnimatePresence>
+                        {recent && recent.delta !== 0 && (
+                            <MotionSpan
+                                key={recent.id}
+                                initial={{ opacity: 0, y: 6, scale: 0.85 }}
+                                animate={{ opacity: 1, y: -2, scale: 1 }}
+                                exit={{ opacity: 0, y: -14 }}
+                                transition={{ duration: 0.45, ease: 'easeOut' }}
+                                className={`absolute right-full mr-1.5 top-0.5 whitespace-nowrap text-xs font-bold font-mono ${
+                                    recent.delta > 0 ? 'text-emerald-300' : 'text-red-300'}`}
+                            >
+                                {signed(recent.delta)}
+                            </MotionSpan>
+                        )}
+                    </AnimatePresence>
+                    {score !== null ? (
+                        <AnimatedNumber
+                            value={score}
+                            className={`block text-2xl leading-none font-bold font-mono ${score < 0 ? 'text-red-300' : 'text-white'}`}
+                        />
+                    ) : (
+                        <span className="block text-2xl leading-none font-bold font-mono text-gray-700">–</span>
+                    )}
+                    <span className="block mt-0.5 text-[10px] leading-tight text-gray-500 whitespace-nowrap">
+                        {pending > 0 && <span className="text-emerald-300/90">+{pending.toFixed(1)} if win</span>}
+                        {bonus > 0 && <span className="text-emerald-400">incl. +{bonus.toFixed(1)} W</span>}
+                        {!pending && !bonus && (score === null && row.avg !== null ? `avg ${row.avg.toFixed(1)}` : 'FPT')}
+                    </span>
+                </div>
+
+                <button
+                    type="button"
+                    onClick={onRemove}
+                    aria-label={`Remove ${player.PlayerName} from this group`}
+                    className="p-1 -mr-1.5 -mt-0.5 rounded-md text-gray-600 hover:text-white hover:bg-[#ffffff0a] transition-colors md:opacity-0 md:group-hover:opacity-100 focus:opacity-100"
+                >
+                    <X size={13} />
+                </button>
             </div>
 
-            {scored ? (
-                <>
-                    <div className="mt-3 flex items-end justify-between gap-3">
-                        <div className="relative">
-                            <div className="flex items-baseline gap-1.5">
-                                <AnimatedNumber
-                                    value={score}
-                                    className={`text-4xl font-bold font-mono ${score < 0 ? 'text-red-300' : 'text-white'}`}
-                                />
-                                <span className="text-xs text-gray-500">FPT</span>
-                            </div>
-                            <AnimatePresence>
-                                {recent && recent.delta !== 0 && (
-                                    <MotionSpan
-                                        key={recent.id}
-                                        initial={{ opacity: 0, y: 8, scale: 0.85 }}
-                                        animate={{ opacity: 1, y: -6, scale: 1 }}
-                                        exit={{ opacity: 0, y: -22 }}
-                                        transition={{ duration: 0.45, ease: 'easeOut' }}
-                                        className={`absolute -top-3 left-full ml-1 whitespace-nowrap text-sm font-bold font-mono ${
-                                            recent.delta > 0 ? 'text-emerald-300' : 'text-red-300'}`}
-                                    >
-                                        {signed(recent.delta)}
-                                    </MotionSpan>
-                                )}
-                            </AnimatePresence>
-                            {pending > 0 && (
-                                <div className="mt-1 text-[11px] text-emerald-300/90">
-                                    +{pending.toFixed(1)} if {row.code} win
-                                </div>
-                            )}
-                            {bonus > 0 && (
-                                <div className="mt-1 text-[11px] text-emerald-400">incl. +{bonus.toFixed(1)} win bonus</div>
-                            )}
-                        </div>
-                        {points.length > 2 && (
+            {line && !line.dnp ? (
+                <div className="mt-1.5 flex items-center justify-between gap-2">
+                    <StatLine line={line} />
+                    {points.length > 2 && (
+                        <span className="shrink-0">
                             <Sparkline
                                 values={points}
                                 change={points[points.length - 1] - points[0]}
-                                width={96}
-                                height={34}
+                                width={56}
+                                height={16}
                                 title="FPT through the game"
                             />
-                        )}
-                    </div>
-                    <StatLine line={line} />
-                    <PaceBar score={score} avg={row.avg} />
-                </>
-            ) : (
-                <Placeholder row={row} now={now} />
-            )}
+                        </span>
+                    )}
+                </div>
+            ) : PLACEHOLDER[state] ? (
+                <div className="mt-1 text-[11px] text-gray-600">{PLACEHOLDER[state]}</div>
+            ) : null}
         </MotionDiv>
     );
 }

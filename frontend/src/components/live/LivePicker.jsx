@@ -12,7 +12,7 @@ const byAverage = (a, b) =>
 /** "PANATHINAIKOS AKTOR ATHENS" -> "Panathinaikos Aktor Athens". */
 const titleCase = (name) => String(name ?? '').toLowerCase().replace(/\b\p{L}/gu, c => c.toUpperCase());
 
-function PlayerRow({ player, selected, locked, onToggle, showTeam }) {
+function PlayerRow({ player, selected, locked, onToggle, showTeam, dots = [] }) {
     const injury = player.InjuryStatus
         ? (String(player.InjuryStatus).toUpperCase().startsWith('OUT') ? 'OUT' : 'GTD')
         : null;
@@ -33,8 +33,11 @@ function PlayerRow({ player, selected, locked, onToggle, showTeam }) {
                 {locked ? <Lock size={10} className="text-purple-300" /> : <Check size={11} strokeWidth={3} />}
             </span>
             <span className="min-w-0 flex-1">
-                <span className={`block truncate ${selected ? 'text-white font-medium' : 'text-gray-200'}`}>
-                    {player.PlayerName}
+                <span className={`flex items-center gap-1.5 truncate ${selected ? 'text-white font-medium' : 'text-gray-200'}`}>
+                    <span className="truncate">{player.PlayerName}</span>
+                    {dots.map(g => (
+                        <span key={g.id} title={`In ${g.name}`} className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: g.colorHex }} />
+                    ))}
                 </span>
                 <span className="block text-[11px] text-gray-500">
                     {player.position}{showTeam && ` · ${euroleagueCode(player)}`}
@@ -51,7 +54,7 @@ function PlayerRow({ player, selected, locked, onToggle, showTeam }) {
     );
 }
 
-function TeamColumn({ code, name, players, isSelected, isLocked, onToggle }) {
+function TeamColumn({ code, name, players, isSelected, isLocked, onToggle, dotsFor }) {
     return (
         <div className="min-w-0">
             <div className="px-2.5 pb-1.5 flex items-baseline gap-2">
@@ -66,6 +69,7 @@ function TeamColumn({ code, name, players, isSelected, isLocked, onToggle }) {
                         selected={isSelected(p)}
                         locked={isLocked(p)}
                         onToggle={onToggle}
+                        dots={dotsFor(p)}
                     />
                 ))}
                 {!players.length && <p className="px-2.5 text-xs text-gray-600">No priced players.</p>}
@@ -75,13 +79,14 @@ function TeamColumn({ code, name, players, isSelected, isLocked, onToggle }) {
 }
 
 /**
- * Choosing whom to follow.
+ * Choosing who goes in a group.
  *
  * Organised the way a game night is: by the round's games, each a pair of squads side
  * by side and ordered by average FPT, so the players worth watching are on top. Search
  * cuts across all of it, and "All teams" reaches players whose game is another day.
+ * A coloured dot marks a player already in one of your other groups.
  */
-export default function LivePicker({ roster, games, focusGame, watch, round, teamNames, now, onClose }) {
+export default function LivePicker({ roster, games, focusGame, watch, group, round, teamNames, now, onClose }) {
     const { user } = useAuth();
     const [query, setQuery] = useState('');
     const [view, setView] = useState('round');
@@ -115,9 +120,13 @@ export default function LivePicker({ roster, games, focusGame, watch, round, tea
             || (a.tipoff - b.tipoff));
     }, [games, focusGame]);
 
-    const watching = useMemo(() => new Set(watch.keys), [watch.keys]);
-    const isSelected = (p) => watching.has(p.PlayerKey);
-    const isLocked = (p) => watch.atLimit && !watching.has(p.PlayerKey);
+    const inGroup = useMemo(() => new Set(group.keys), [group.keys]);
+    const followed = useMemo(() => new Set(watch.allKeys), [watch.allKeys]);
+    const isSelected = (p) => inGroup.has(p.PlayerKey);
+    const isLocked = (p) => watch.atLimit && !followed.has(p.PlayerKey);
+    const toggle = (key) => watch.toggle(group.id, key);
+    const others = watch.groups.filter(g => g.id !== group.id);
+    const dotsFor = (p) => others.filter(g => g.keys.includes(p.PlayerKey));
     const byKey = useMemo(() => new Map(roster.map(p => [p.PlayerKey, p])), [roster]);
 
     const results = useMemo(() => {
@@ -143,11 +152,15 @@ export default function LivePicker({ roster, games, focusGame, watch, round, tea
                 <div className="p-4 sm:p-6 pb-3 space-y-3 border-b border-white/5">
                     <div className="flex items-start justify-between gap-3">
                         <div>
-                            <h2 className="text-xl font-bold text-white">Pick players to watch</h2>
+                            <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                                <span className="w-3 h-3 rounded-full shrink-0" style={{ background: group.colorHex }} />
+                                <span className="truncate">Add players to {group.name}</span>
+                            </h2>
                             <p className="text-sm text-gray-400 mt-0.5">
+                                {group.keys.length} in {group.name}
                                 {watch.limit
-                                    ? <>{watch.keys.length} of {watch.limit} free · <span className="text-purple-300">sign in free to watch more</span></>
-                                    : <>Watching {watch.keys.length} {watch.keys.length === 1 ? 'player' : 'players'}{user ? ' · saved to your account' : ''}</>}
+                                    ? <> · {watch.allKeys.length} of {watch.limit} free · <span className="text-purple-300">sign in free to watch more</span></>
+                                    : user ? ' · saved to your account' : ''}
                             </p>
                         </div>
                         <button
@@ -160,13 +173,13 @@ export default function LivePicker({ roster, games, focusGame, watch, round, tea
                         </button>
                     </div>
 
-                    {watch.keys.length > 0 && (
+                    {group.keys.length > 0 && (
                         <div className="flex flex-wrap gap-1.5">
-                            {watch.keys.map(key => byKey.get(key)).filter(Boolean).map(p => (
+                            {group.keys.map(key => byKey.get(key)).filter(Boolean).map(p => (
                                 <button
                                     key={p.PlayerKey}
                                     type="button"
-                                    onClick={() => watch.remove(p.PlayerKey)}
+                                    onClick={() => watch.remove(group.id, p.PlayerKey)}
                                     className="flex items-center gap-1 pl-2 pr-1.5 py-1 rounded-full text-xs bg-purple-500/15 text-purple-200 border border-purple-500/30 hover:bg-purple-500/25"
                                 >
                                     {p.PlayerName} <X size={12} />
@@ -213,7 +226,8 @@ export default function LivePicker({ roster, games, focusGame, watch, round, tea
                                     player={p}
                                     selected={isSelected(p)}
                                     locked={isLocked(p)}
-                                    onToggle={watch.toggle}
+                                    onToggle={toggle}
+                                    dots={dotsFor(p)}
                                     showTeam
                                 />
                             ))}
@@ -246,7 +260,8 @@ export default function LivePicker({ roster, games, focusGame, watch, round, tea
                                         players={squads.get(code) ?? []}
                                         isSelected={isSelected}
                                         isLocked={isLocked}
-                                        onToggle={watch.toggle}
+                                        onToggle={toggle}
+                                        dotsFor={dotsFor}
                                     />
                                 ))}
                             </div>
@@ -263,7 +278,8 @@ export default function LivePicker({ roster, games, focusGame, watch, round, tea
                                         players={squads.get(code) ?? []}
                                         isSelected={isSelected}
                                         isLocked={isLocked}
-                                        onToggle={watch.toggle}
+                                        onToggle={toggle}
+                                        dotsFor={dotsFor}
                                     />
                                 </div>
                             ))}
