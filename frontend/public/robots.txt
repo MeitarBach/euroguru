@@ -1,0 +1,8 @@
+# Everything here is public statistics; nothing is behind a login that a crawler
+# could reach. Being indexable is deliberate: a domain that search engines and
+# security vendors can read is one they can classify, and an unclassified domain
+# is what corporate filters block by default.
+User-agent: *
+Allow: /
+
+Sitemap: https://eurogurufantasy.com/sitemap.xml

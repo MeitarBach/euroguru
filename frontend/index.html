@@ -7,10 +7,61 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <!-- Keeps mobile browser chrome on the app's background instead of flashing white. -->
     <meta name="theme-color" content="#050507" />
-    <title>EuroGuru</title>
+
+    <title>EuroGuru — EuroLeague Fantasy Basketball Stats &amp; Analytics</title>
+
+    <!--
+      The app is a client-rendered SPA, so anything that reads the page without
+      running JavaScript - search crawlers, link unfurlers, and the domain
+      classifiers security filters rely on - used to receive an empty <div>. A
+      brand-new domain with no readable content is what those filters treat as
+      unclassified, and unclassified is what they block by default. The
+      description, the card tags and the <noscript> body below exist so every one
+      of them can see what this site actually is: basketball statistics.
+    -->
+    <meta
+      name="description"
+      content="Free EuroLeague fantasy basketball analytics: player stats, minutes, true shooting and usage, price tracking by round, injury reports and data-driven player recommendations."
+    />
+    <link rel="canonical" href="https://eurogurufantasy.com/" />
+    <meta name="robots" content="index, follow" />
+
+    <!-- Open Graph, so a shared link renders a real card instead of a bare URL. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="EuroGuru" />
+    <meta property="og:url" content="https://eurogurufantasy.com/" />
+    <meta property="og:title" content="EuroGuru — EuroLeague Fantasy Basketball Stats &amp; Analytics" />
+    <meta
+      property="og:description"
+      content="Free EuroLeague fantasy basketball analytics: player stats, minutes, true shooting and usage, price tracking by round, injury reports and data-driven player recommendations."
+    />
+    <meta property="og:image" content="https://eurogurufantasy.com/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="EuroGuru" />
+    <meta property="og:locale" content="en_US" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="EuroGuru — EuroLeague Fantasy Basketball Stats &amp; Analytics" />
+    <meta
+      name="twitter:description"
+      content="Free EuroLeague fantasy basketball analytics: player stats, price tracking by round, injury reports and player recommendations."
+    />
+    <meta name="twitter:image" content="https://eurogurufantasy.com/og-image.png" />
   </head>
   <body>
     <div id="root"></div>
+    <noscript>
+      <h1>EuroGuru — EuroLeague Fantasy Basketball Analytics</h1>
+      <p>
+        EuroGuru is a free statistics site for EuroLeague basketball. It tracks
+        every player's scoring, rebounds, assists, minutes, true shooting
+        percentage and usage rate round by round, follows how player prices move
+        through the season, lists the current injury report, and suggests players
+        based on output and consistency.
+      </p>
+      <p>This site needs JavaScript enabled to show the interactive tables and charts.</p>
+    </noscript>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
