@@ -1,12 +1,15 @@
 /**
- * The season's fixture list, read straight from Euroleague.
+ * The season's fixture list, from Euroleague.
  *
  * The backend stores the schedule too, but without tip-off times, and a live view is
- * mostly about times. This feed is public, CORS-open, about 9 KB gzipped, and the
- * browser caches it for two hours on its own.
+ * mostly about times. About 9 KB gzipped, cached for two hours.
+ *
+ * Read through a same-origin path (a Vercel rewrite in production, the Vite proxy in
+ * development) rather than from api-live.euroleague.net directly: that host's CORS
+ * header is unreliable - see the comment in vite.config.js.
  */
 
-const SCHEDULE_URL = 'https://api-live.euroleague.net/v1/schedules';
+const SCHEDULE_URL = '/euroleague/schedules';
 
 // Euroleague publishes every tip-off in Central European time, wherever the game is:
 // Dubai's 20:00 local start is listed as 18:00.

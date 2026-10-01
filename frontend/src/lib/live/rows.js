@@ -11,12 +11,12 @@ export function scoreOf(line, game, code) {
 }
 
 // Display order: the action first, then the finished, then what is still to come.
-const RANK = { live: 0, bench: 1, waiting: 1, final: 2, dnp: 3, upcoming: 4, out: 5, nogame: 6 };
+const RANK = { live: 0, idle: 1, waiting: 1, final: 2, dnp: 3, upcoming: 4, out: 5, nogame: 6 };
 
 /**
  * Everything a watch card shows about one player, derived from the round's games.
  *
- * state: live | final | upcoming | bench (in a live game, yet to play) | waiting (game on,
+ * state: live | final | upcoming | idle (in a live game, yet to play) | waiting (game on,
  * boxscore not read yet) | out (not in the squad) | dnp | nogame (no game this round).
  */
 export function watchRow(player, games) {
@@ -37,7 +37,7 @@ export function watchRow(player, games) {
 
     const line = game.byKey[player.PlayerKey] ?? null;
     if (!line) return { ...row, state: 'out' };
-    if (line.dnp) return { ...row, line, state: game.status === 'final' ? 'dnp' : 'bench' };
+    if (line.dnp) return { ...row, line, state: game.status === 'final' ? 'dnp' : 'idle' };
 
     const leading = mine > theirs;
     return {
@@ -50,25 +50,49 @@ export function watchRow(player, games) {
     };
 }
 
+// What a fantasy lineup role is worth: a bench player scores half, the captain double.
+export const ROLE_FACTOR = { starter: 1, captain: 2, bench: 0.5 };
+const round2 = (x) => Math.round(x * 100) / 100;
+
+/**
+ * A row as one group counts it, for the player's role in that group: starter, captain
+ * or bench. The factor applies to everything - score, pending win bonus and season
+ * average alike - while `score` keeps the player's own FPT for display.
+ */
+export function inGroup(row, role = 'starter') {
+    const factor = ROLE_FACTOR[role] ?? 1;
+    return {
+        ...row,
+        role,
+        benched: role === 'bench',
+        captain: role === 'captain',
+        factor,
+        counted: row.score === null ? null : round2(row.score * factor),
+        countedPending: round2(row.pending * factor),
+        countedBonus: round2(row.bonus * factor),
+        countedAvg: row.avg === null ? null : row.avg * factor,
+    };
+}
+
 export function sortRows(rows) {
     return [...rows].sort((a, b) =>
         (RANK[a.state] - RANK[b.state])
-        || ((b.score ?? -Infinity) - (a.score ?? -Infinity))
+        || ((b.counted ?? b.score ?? -Infinity) - (a.counted ?? a.score ?? -Infinity))
         || ((a.game?.tipoff ?? Infinity) - (b.game?.tipoff ?? Infinity))
-        || ((b.avg ?? 0) - (a.avg ?? 0)));
+        || ((b.countedAvg ?? b.avg ?? 0) - (a.countedAvg ?? a.avg ?? 0)));
 }
 
-/** The round so far, what the win bonuses would add, and a projection for the rest. */
+/** A group's round so far, what its win bonuses would add, and a projection for the rest. */
 export function totals(rows) {
-    const scored = rows.filter(r => r.score !== null);
-    const toPlay = rows.filter(r => ['upcoming', 'bench', 'waiting'].includes(r.state));
-    const total = scored.reduce((s, r) => s + r.score, 0);
+    const toPlay = rows.filter(r => ['upcoming', 'idle', 'waiting'].includes(r.state));
+    const total = rows.reduce((s, r) => s + (r.counted ?? 0), 0);
     return {
-        total: Math.round(total * 10) / 10,
-        pending: Math.round(rows.reduce((s, r) => s + r.pending, 0) * 10) / 10,
-        projected: Math.round((total + toPlay.reduce((s, r) => s + (r.avg ?? 0), 0)) * 10) / 10,
+        total: round2(total),
+        pending: round2(rows.reduce((s, r) => s + r.countedPending, 0)),
+        projected: round2(total + toPlay.reduce((s, r) => s + (r.countedAvg ?? 0), 0)),
         live: rows.filter(r => r.state === 'live').length,
         final: rows.filter(r => ['final', 'dnp'].includes(r.state)).length,
         toPlay: toPlay.length,
+        benched: rows.filter(r => r.benched).length,
     };
 }

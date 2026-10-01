@@ -3,6 +3,9 @@ import { motion } from 'framer-motion';
 import { Plus, Pencil, Trash2, Check, X } from 'lucide-react';
 import AnimatedNumber from './AnimatedNumber';
 import LiveDot from './LiveDot';
+import { decimalsFor } from '../../lib/live/format';
+
+const fixed = (x) => x.toFixed(decimalsFor(x));
 
 const MotionLi = motion.li;
 
@@ -65,7 +68,7 @@ export function GroupBoard({ round, groups, selectedId, onSelect, onCreate }) {
             <ul className="space-y-1">
                 {ranked.map((group, i) => {
                     const selected = group.id === selectedId;
-                    const gap = Math.round((leader - group.sums.total) * 10) / 10;
+                    const gap = Math.round((leader - group.sums.total) * 100) / 100;
                     return (
                         <MotionLi key={group.id} layout transition={{ type: 'spring', stiffness: 420, damping: 38 }}>
                             <button
@@ -83,16 +86,21 @@ export function GroupBoard({ round, groups, selectedId, onSelect, onCreate }) {
                                     </span>
                                     <span className="flex items-center gap-1.5 text-[11px] text-gray-500">
                                         {group.keys.length} {group.keys.length === 1 ? 'player' : 'players'}
+                                        {group.sums.benched > 0 && <span className="text-amber-300/70">· {group.sums.benched} bench</span>}
                                         {group.sums.live > 0 && <><span>·</span><LiveDot /> <span className="text-red-300">{group.sums.live} live</span></>}
-                                        {group.sums.pending > 0 && <span className="text-emerald-300/80">· +{group.sums.pending.toFixed(1)} if wins hold</span>}
+                                        {group.sums.pending > 0 && <span className="text-emerald-300/80">· +{fixed(group.sums.pending)} if wins hold</span>}
                                     </span>
                                 </span>
                                 <span className="text-right shrink-0">
-                                    <AnimatedNumber value={group.sums.total} className="block text-xl leading-none font-bold font-mono text-white" />
+                                    <AnimatedNumber
+                                        value={group.sums.total}
+                                        decimals={decimalsFor(group.sums.total)}
+                                        className="block text-xl leading-none font-bold font-mono text-white"
+                                    />
                                     <span className="block mt-0.5 text-[10px] text-gray-500 whitespace-nowrap">
                                         {!anyScored
-                                            ? `proj ${group.sums.projected.toFixed(1)}`
-                                            : i === 0 || gap === 0 ? (groups.length > 1 ? 'leading' : 'FPT') : `−${gap.toFixed(1)}`}
+                                            ? `proj ${fixed(group.sums.projected)}`
+                                            : i === 0 || gap === 0 ? (groups.length > 1 ? 'leading' : 'FPT') : `−${fixed(gap)}`}
                                     </span>
                                 </span>
                             </button>
@@ -137,7 +145,7 @@ export function GroupHeader({ group, canDelete, onRename, onDelete }) {
                 <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: group.colorHex }} />
                 <h3 className="text-base font-semibold text-white truncate">{group.name}</h3>
                 <span className="text-xs text-gray-500 shrink-0">
-                    {group.sums.total.toFixed(1)} FPT
+                    {fixed(group.sums.total)} FPT
                     {group.sums.toPlay > 0 && ` · ${group.sums.toPlay} to play`}
                 </span>
                 <button

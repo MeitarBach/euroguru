@@ -2,6 +2,10 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
     {
+      "source": "/euroleague/:path*",
+      "destination": "https://api-live.euroleague.net/v1/:path*"
+    },
+    {
       "source": "/api/:path*",
       "destination": "https://euroguru-api.vercel.app/api/:path*"
     }

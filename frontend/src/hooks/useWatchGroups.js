@@ -12,7 +12,7 @@ const NAME_MAX = 24;
 // Colours a group keeps for life: stored by index, so deleting one never repaints another.
 export const GROUP_COLORS = ['#a78bfa', '#38bdf8', '#fbbf24', '#34d399', '#fb7185', '#22d3ee', '#f472b6', '#a3e635'];
 
-const DEFAULT_GROUPS = [{ id: 'g-mine', name: 'My team', color: 0, keys: [] }];
+const DEFAULT_GROUPS = [{ id: 'g-mine', name: 'My team', color: 0, keys: [], bench: [], captain: null }];
 
 function load() {
     try {
@@ -20,12 +20,21 @@ function load() {
         if (!Array.isArray(saved) || !saved.length) return DEFAULT_GROUPS;
         return saved
             .filter(g => g && typeof g.id === 'string' && Array.isArray(g.keys))
-            .map(g => ({
-                id: g.id,
-                name: String(g.name ?? 'Group').slice(0, NAME_MAX),
-                color: Number.isInteger(g.color) ? g.color : 0,
-                keys: g.keys.filter(k => typeof k === 'string'),
-            }));
+            .map(g => {
+                const keys = g.keys.filter(k => typeof k === 'string');
+                // Roles are per group (lib/live/rows.js says what each is worth): the
+                // same player can captain your team and sit on a rival's bench.
+                const bench = (Array.isArray(g.bench) ? g.bench : []).filter(k => keys.includes(k));
+                const captain = keys.includes(g.captain) && !bench.includes(g.captain) ? g.captain : null;
+                return {
+                    id: g.id,
+                    name: String(g.name ?? 'Group').slice(0, NAME_MAX),
+                    color: Number.isInteger(g.color) ? g.color : 0,
+                    keys,
+                    bench,
+                    captain,
+                };
+            });
     } catch {
         return DEFAULT_GROUPS;
     }
@@ -90,7 +99,33 @@ export default function useWatchGroups() {
     }, [groups, allKeys, atLimit, unlock, save]);
 
     const remove = useCallback((groupId, key) => {
-        save(groups.map(g => (g.id === groupId ? { ...g, keys: g.keys.filter(k => k !== key) } : g)));
+        save(groups.map(g => (g.id === groupId
+            ? {
+                ...g,
+                keys: g.keys.filter(k => k !== key),
+                bench: g.bench.filter(k => k !== key),
+                captain: g.captain === key ? null : g.captain,
+            }
+            : g)));
+    }, [groups, save]);
+
+    // Benching the captain takes the armband off: a captain is always a starter.
+    const toggleBench = useCallback((groupId, key) => {
+        save(groups.map(g => {
+            if (g.id !== groupId || !g.keys.includes(key)) return g;
+            if (g.bench.includes(key)) return { ...g, bench: g.bench.filter(k => k !== key) };
+            return { ...g, bench: [...g.bench, key], captain: g.captain === key ? null : g.captain };
+        }));
+    }, [groups, save]);
+
+    // One captain per group: naming one replaces the last, naming the same one again
+    // clears it, and a benched player made captain comes off the bench.
+    const toggleCaptain = useCallback((groupId, key) => {
+        save(groups.map(g => {
+            if (g.id !== groupId || !g.keys.includes(key)) return g;
+            if (g.captain === key) return { ...g, captain: null };
+            return { ...g, captain: key, bench: g.bench.filter(k => k !== key) };
+        }));
     }, [groups, save]);
 
     const toggle = useCallback((groupId, key) => {
@@ -106,6 +141,8 @@ export default function useWatchGroups() {
             name: cleanName(name, `Group ${groups.length + 1}`),
             color: color === -1 ? groups.length % GROUP_COLORS.length : color,
             keys: [],
+            bench: [],
+            captain: null,
         };
         save([...groups, group]);
         select(group.id);
@@ -124,7 +161,7 @@ export default function useWatchGroups() {
 
     return {
         groups, selected, select, allKeys,
-        add, remove, toggle, create, rename, destroy,
+        add, remove, toggle, toggleBench, toggleCaptain, create, rename, destroy,
         atLimit, limit: locked ? FREE_WATCH_LIMIT : null,
     };
 }

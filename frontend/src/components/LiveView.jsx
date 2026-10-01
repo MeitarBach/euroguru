@@ -8,8 +8,9 @@ import useNow from '../hooks/useNow';
 import { useOpenPlayer } from '../hooks/playerDetailContext';
 import { euroleagueSource } from '../lib/live/source';
 import { demoSource } from '../lib/live/demo';
-import { watchRow, sortRows, totals } from '../lib/live/rows';
-import { countdown, ago } from '../lib/live/format';
+import { watchRow, inGroup, sortRows, totals } from '../lib/live/rows';
+import { countdown, ago, decimalsFor } from '../lib/live/format';
+import { LayoutGroup } from 'framer-motion';
 import { chime, enableChime } from '../lib/live/chime';
 import { euroleagueCode } from '../lib/live/teams';
 import GameStrip from './live/GameStrip';
@@ -28,6 +29,8 @@ const BIG_PLAY = 3;
 // Euroleague's edge holds an answer for up to a minute; much older than that while a
 // game is on means their feed has stalled, which is worth saying out loud.
 const STALE_FEED_MS = 150_000;
+
+const fixedScore = (x) => x.toFixed(decimalsFor(x));
 
 const loadSound = () => {
     try {
@@ -182,8 +185,13 @@ export default function LiveView() {
             .filter(Boolean)
             .map(p => [p.PlayerKey, watchRow(p, live.games)]),
     ), [watch.allKeys, rosterByKey, live.games]);
+    // Each group counts its own players by their role in it - captain double, bench
+    // half - with the captain pinned to the top of the starters.
     const groups = useMemo(() => watch.groups.map(g => {
-        const rows = sortRows(g.keys.map(k => rowByKey.get(k)).filter(Boolean));
+        const bench = new Set(g.bench);
+        const roleOf = (key) => (g.captain === key ? 'captain' : bench.has(key) ? 'bench' : 'starter');
+        const sorted = sortRows(g.keys.map(k => rowByKey.get(k)).filter(Boolean).map(r => inGroup(r, roleOf(r.key))));
+        const rows = [...sorted.filter(r => r.captain), ...sorted.filter(r => !r.captain)];
         return { ...g, colorHex: GROUP_COLORS[g.color % GROUP_COLORS.length], rows, sums: totals(rows) };
     }), [watch.groups, rowByKey]);
     const group = groups.find(g => g.id === watch.selected.id) ?? groups[0];
@@ -317,20 +325,40 @@ export default function LiveView() {
                                     onPick={() => openPicker()}
                                 />
                             ) : (
-                                <div className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-3 gap-2">
-                                    {group.rows.map(row => (
-                                        <WatchCard
-                                            key={row.key}
-                                            row={row}
-                                            history={live.history[row.key]}
-                                            lastEvent={lastEvent.get(row.key)}
-                                            now={now}
-                                            alsoIn={groupsOf(row.key).filter(g => g.id !== group.id)}
-                                            onRemove={() => watch.remove(group.id, row.key)}
-                                            onOpen={() => openPlayer(row.player.PlayerName, CURRENT_SEASON)}
-                                        />
+                                <LayoutGroup id={group.id}>
+                                    {[
+                                        ['Starters', group.rows.filter(r => !r.benched), null],
+                                        ['Bench', group.rows.filter(r => r.benched), 'count half'],
+                                    ].filter(([, rows], i) => i === 0 || rows.length).map(([title, rows, note]) => (
+                                        <div key={title} className="space-y-2">
+                                            <div className="flex items-baseline justify-between px-1 text-[11px] uppercase tracking-wider text-gray-500 font-semibold">
+                                                <span>
+                                                    {title} · {rows.length}
+                                                    {note && <span className="normal-case tracking-normal font-normal text-gray-600"> · {note}</span>}
+                                                </span>
+                                                <span className="font-mono normal-case tracking-normal text-gray-400">
+                                                    {fixedScore(rows.reduce((s, r) => s + (r.counted ?? 0), 0))}
+                                                </span>
+                                            </div>
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-3 gap-2">
+                                                {rows.map(row => (
+                                                    <WatchCard
+                                                        key={row.key}
+                                                        row={row}
+                                                        history={live.history[row.key]}
+                                                        lastEvent={lastEvent.get(row.key)}
+                                                        now={now}
+                                                        alsoIn={groupsOf(row.key).filter(g => g.id !== group.id)}
+                                                        onRemove={() => watch.remove(group.id, row.key)}
+                                                        onToggleBench={() => watch.toggleBench(group.id, row.key)}
+                                                        onToggleCaptain={() => watch.toggleCaptain(group.id, row.key)}
+                                                        onOpen={() => openPlayer(row.player.PlayerName, CURRENT_SEASON)}
+                                                    />
+                                                ))}
+                                            </div>
+                                        </div>
                                     ))}
-                                </div>
+                                </LayoutGroup>
                             )}
                         </section>
 

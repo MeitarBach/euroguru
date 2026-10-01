@@ -36,3 +36,6 @@ export const signed = (x) => `${x > 0 ? '+' : ''}${x.toFixed(1)}`;
 
 /** "S. Vezenkov" -> "Vezenkov", for tight spots like the feed. */
 export const surnameOf = (name) => String(name ?? '').replace(/\s*\([^)]*\)$/, '').split(' ').slice(1).join(' ') || name;
+
+/** One decimal, or two when a halved bench score needs them (6.65 stays 6.65). */
+export const decimalsFor = (x) => (x !== null && x !== undefined && Math.abs(x * 10 - Math.round(x * 10)) > 1e-6 ? 2 : 1);

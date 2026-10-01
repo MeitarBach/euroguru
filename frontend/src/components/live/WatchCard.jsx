@@ -4,7 +4,7 @@ import { X } from 'lucide-react';
 import AnimatedNumber from './AnimatedNumber';
 import LiveDot from './LiveDot';
 import Sparkline from '../charts/Sparkline';
-import { whenLabel, countdown, signed } from '../../lib/live/format';
+import { whenLabel, countdown, decimalsFor } from '../../lib/live/format';
 
 // Aliased so the lint config's unused-variable check sees `motion` used.
 const MotionDiv = motion.div;
@@ -18,7 +18,7 @@ const BIG_PLAY = 3;
 /** Where the player's game is: "Q3 04:12", "Final W 81–80", "19:00 · in 2h". */
 function GameNote({ row, now }) {
     const { state, game } = row;
-    if (['live', 'bench', 'waiting'].includes(state)) {
+    if (['live', 'idle', 'waiting'].includes(state)) {
         return <span className="text-red-300">{[game.period, game.clock].filter(Boolean).join(' ') || 'Live'}</span>;
     }
     if (['final', 'dnp', 'out'].includes(state)) {
@@ -58,23 +58,67 @@ function StatLine({ line }) {
     );
 }
 
+const fixed = (x) => x.toFixed(decimalsFor(x));
+const signedValue = (x) => `${x > 0 ? '+' : ''}${fixed(x)}`;
+
 const PLACEHOLDER = {
-    bench: 'On the bench, yet to play',
+    idle: 'Yet to check in',
     waiting: 'Game on, reading the boxscore',
     out: 'Not in the squad',
     dnp: 'Did not play',
 };
 
 /**
+ * The player's role in this group: Starter / Bench ½, and for a starter the captain's
+ * armband - a bench player counts half, the captain double.
+ */
+function RoleControls({ benched, captain, onToggleBench, onToggleCaptain }) {
+    return (
+        <span className="flex items-center gap-1 shrink-0">
+            <button
+                type="button"
+                onClick={onToggleBench}
+                aria-pressed={benched}
+                title={benched ? 'On the bench: counts half. Tap to make a starter.' : 'Starter. Tap if on the bench (counts half).'}
+                className={`px-1.5 py-0.5 rounded text-[10px] font-semibold leading-none border transition-colors
+                    ${benched
+                        ? 'bg-sky-500/10 text-sky-300 border-sky-500/30 hover:bg-sky-500/20'
+                        : 'text-gray-500 border-white/10 hover:text-gray-200 hover:border-white/20'}`}
+            >
+                {benched ? 'Bench ½' : 'Starter'}
+            </button>
+            {!benched && (
+                <button
+                    type="button"
+                    onClick={onToggleCaptain}
+                    aria-pressed={captain}
+                    aria-label={captain ? 'Captain (counts double). Tap to remove.' : 'Make captain (counts double)'}
+                    title={captain ? 'Captain: counts double. Tap to remove.' : 'Make captain: counts double.'}
+                    className={`w-[18px] h-[18px] rounded-full text-[10px] font-bold leading-none flex items-center justify-center border transition-colors
+                        ${captain
+                            ? 'bg-yellow-400 text-black border-yellow-300'
+                            : 'text-gray-600 border-white/10 hover:text-yellow-300 hover:border-yellow-400/50'}`}
+                >
+                    C
+                </button>
+            )}
+        </span>
+    );
+}
+
+/**
  * One followed player, live - compact enough that a phone shows several at once.
  *
- * Everything that moves does so in the direction of the news: the number counts to its
- * new value and flashes, a "+2.0" floats off it, and a big play rings the card. The card
- * glides when the order changes, so an overtake reads as a move, not as a jump.
+ * Shows what the player is worth to this group: their FPT, or half of it when they are
+ * on this group's bench. Everything that moves does so in the direction of the news:
+ * the number counts to its new value and flashes, a "+2.0" floats off it, and a big
+ * play rings the card. The card glides when the order changes, so an overtake reads as
+ * a move rather than a jump.
  */
-export default function WatchCard({ row, history, lastEvent, now, onRemove, onOpen, alsoIn = [] }) {
-    const { player, line, state, score, pending, bonus } = row;
+export default function WatchCard({ row, history, lastEvent, now, onRemove, onOpen, onToggleBench, onToggleCaptain, alsoIn = [] }) {
+    const { player, line, state, score, benched, captain, factor, counted, countedPending: pending, countedBonus: bonus } = row;
     const recent = lastEvent && now - lastEvent.at < BUBBLE_MS ? lastEvent : null;
+    const bubble = recent ? Math.round(recent.delta * factor * 100) / 100 : 0;
     const glowing = recent && Math.abs(recent.delta) >= BIG_PLAY && now - recent.at < GLOW_MS;
     const points = history ?? [];
     const live = state === 'live';
@@ -85,9 +129,12 @@ export default function WatchCard({ row, history, lastEvent, now, onRemove, onOp
     return (
         <MotionDiv
             layout
+            // The same id in either section, so a card glides across when its role changes.
+            layoutId={row.key}
             transition={{ type: 'spring', stiffness: 420, damping: 38 }}
-            className={`group relative rounded-xl border px-3 py-2.5 bg-[#ffffff05] transition-shadow duration-500
-                ${live ? 'border-red-500/25' : 'border-white/5'}
+            className={`group relative rounded-xl border px-3 py-2.5 transition-shadow duration-500
+                ${captain ? 'bg-yellow-400/[0.04]' : 'bg-[#ffffff05]'}
+                ${live ? 'border-red-500/25' : captain ? 'border-yellow-400/25' : 'border-white/5'}
                 ${glowing ? 'ring-2 ring-emerald-400/50 shadow-[0_0_28px_-8px_rgba(52,211,153,0.55)]' : ''}`}
         >
             <div className="flex items-start gap-2.5">
@@ -95,7 +142,7 @@ export default function WatchCard({ row, history, lastEvent, now, onRemove, onOp
                     <div className="flex items-center gap-1.5 min-w-0">
                         {live && (line?.onCourt
                             ? <span title="On the court"><LiveDot color="green" /></span>
-                            : <span title="On the bench" className="h-2 w-2 rounded-full bg-gray-600 shrink-0" />)}
+                            : <span title="Off the court" className="h-2 w-2 rounded-full bg-gray-600 shrink-0" />)}
                         <button
                             type="button"
                             onClick={onOpen}
@@ -105,7 +152,7 @@ export default function WatchCard({ row, history, lastEvent, now, onRemove, onOp
                         </button>
                         {injury && <span className="text-[9px] px-1 rounded bg-red-500/15 text-red-300 shrink-0">{injury}</span>}
                         {alsoIn.map(g => (
-                            <span key={g.id} title={`Also in ${g.name}`} className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: g.color }} />
+                            <span key={g.id} title={`Also in ${g.name}`} className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: g.colorHex }} />
                         ))}
                     </div>
                     <div className="text-[11px] text-gray-500 truncate">
@@ -115,7 +162,7 @@ export default function WatchCard({ row, history, lastEvent, now, onRemove, onOp
 
                 <div className="relative text-right shrink-0">
                     <AnimatePresence>
-                        {recent && recent.delta !== 0 && (
+                        {recent && bubble !== 0 && (
                             <MotionSpan
                                 key={recent.id}
                                 initial={{ opacity: 0, y: 6, scale: 0.85 }}
@@ -123,24 +170,29 @@ export default function WatchCard({ row, history, lastEvent, now, onRemove, onOp
                                 exit={{ opacity: 0, y: -14 }}
                                 transition={{ duration: 0.45, ease: 'easeOut' }}
                                 className={`absolute right-full mr-1.5 top-0.5 whitespace-nowrap text-xs font-bold font-mono ${
-                                    recent.delta > 0 ? 'text-emerald-300' : 'text-red-300'}`}
+                                    bubble > 0 ? 'text-emerald-300' : 'text-red-300'}`}
                             >
-                                {signed(recent.delta)}
+                                {signedValue(bubble)}
                             </MotionSpan>
                         )}
                     </AnimatePresence>
-                    {score !== null ? (
+                    {counted !== null ? (
                         <AnimatedNumber
-                            value={score}
-                            className={`block text-2xl leading-none font-bold font-mono ${score < 0 ? 'text-red-300' : 'text-white'}`}
+                            value={counted}
+                            decimals={decimalsFor(counted)}
+                            className={`block text-2xl leading-none font-bold font-mono ${
+                                counted < 0 ? 'text-red-300' : captain ? 'text-yellow-200' : benched ? 'text-gray-300' : 'text-white'}`}
                         />
                     ) : (
                         <span className="block text-2xl leading-none font-bold font-mono text-gray-700">–</span>
                     )}
                     <span className="block mt-0.5 text-[10px] leading-tight text-gray-500 whitespace-nowrap">
-                        {pending > 0 && <span className="text-emerald-300/90">+{pending.toFixed(1)} if win</span>}
-                        {bonus > 0 && <span className="text-emerald-400">incl. +{bonus.toFixed(1)} W</span>}
-                        {!pending && !bonus && (score === null && row.avg !== null ? `avg ${row.avg.toFixed(1)}` : 'FPT')}
+                        {pending > 0 && <span className="text-emerald-300/90">+{fixed(pending)} if win</span>}
+                        {bonus > 0 && <span className="text-emerald-400">incl. +{fixed(bonus)} W</span>}
+                        {!pending && !bonus && (score === null
+                            ? (row.countedAvg !== null ? `avg ${fixed(Math.round(row.countedAvg * 100) / 100)}` : '')
+                            : captain ? <span className="text-yellow-300/80">×2 of {score.toFixed(1)}</span>
+                                : benched ? <span className="text-sky-300/80">½ of {score.toFixed(1)}</span> : 'FPT')}
                     </span>
                 </div>
 
@@ -156,7 +208,15 @@ export default function WatchCard({ row, history, lastEvent, now, onRemove, onOp
 
             {line && !line.dnp ? (
                 <div className="mt-1.5 flex items-center justify-between gap-2">
-                    <StatLine line={line} />
+                    <div className="flex items-center gap-2 min-w-0">
+                        <RoleControls
+                            benched={benched}
+                            captain={captain}
+                            onToggleBench={onToggleBench}
+                            onToggleCaptain={onToggleCaptain}
+                        />
+                        <StatLine line={line} />
+                    </div>
                     {points.length > 2 && (
                         <span className="shrink-0">
                             <Sparkline
@@ -169,9 +229,17 @@ export default function WatchCard({ row, history, lastEvent, now, onRemove, onOp
                         </span>
                     )}
                 </div>
-            ) : PLACEHOLDER[state] ? (
-                <div className="mt-1 text-[11px] text-gray-600">{PLACEHOLDER[state]}</div>
-            ) : null}
+            ) : (
+                <div className="mt-1.5 flex items-center gap-2 text-[11px] text-gray-600">
+                    <RoleControls
+                        benched={benched}
+                        captain={captain}
+                        onToggleBench={onToggleBench}
+                        onToggleCaptain={onToggleCaptain}
+                    />
+                    {PLACEHOLDER[state]}
+                </div>
+            )}
         </MotionDiv>
     );
 }
