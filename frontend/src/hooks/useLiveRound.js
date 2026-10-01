@@ -134,7 +134,7 @@ export default function useLiveRound({ source, seasonCode, roster, watchKeys, on
         try {
             window.sessionStorage.setItem(
                 storageKey(seasonCode, journal.round),
-                JSON.stringify({ events: journal.events, history: journal.history }),
+                JSON.stringify({ events: journal.events, gameEvents: journal.gameEvents ?? {}, history: journal.history }),
             );
         } catch { /* the feed just will not survive a reload */ }
     }, [seasonCode, journal]);
@@ -171,6 +171,7 @@ export default function useLiveRound({ source, seasonCode, roster, watchKeys, on
 
             const states = { ...prevStates };
             const events = [];
+            const gamePlays = {};
             const history = { ...(live.current.journal?.history ?? {}) };
             let historyChanged = false;
             let ok = 0;
@@ -214,21 +215,18 @@ export default function useLiveRound({ source, seasonCode, roster, watchKeys, on
                     events.push({ kind: 'final', game: game.code, at: now, text: `Final: ${label}` });
                 }
 
-                for (const key of watching) {
-                    const line = byKey?.[key];
-                    if (!line) continue;
+                // One player's change since the last poll: the sparkline point, and an
+                // event when something happened. `id` is a PlayerKey, or "line:<id>" for
+                // a player the fantasy game does not price.
+                const track = (id, line, before) => {
                     const code = line.code;
                     const score = scoreOf(line, view, code);
-                    const before = prev?.byKey?.[key];
-
-                    // The sparkline: one point per change, starting from zero at tip-off.
-                    const points = history[key] ?? (next.status !== 'final' ? [0] : []);
+                    const points = history[id] ?? (next.status !== 'final' ? [0] : []);
                     if (points[points.length - 1] !== score) {
-                        history[key] = [...points, score].slice(-MAX_HISTORY);
+                        history[id] = [...points, score].slice(-MAX_HISTORY);
                         historyChanged = true;
                     }
-
-                    if (!before) continue;
+                    if (!before) return null;
                     const prevScore = scoreOf(before, { ...game, ...prev }, code);
                     const delta = round1(score - prevScore);
                     const parts = STAT_PARTS
@@ -242,22 +240,49 @@ export default function useLiveRound({ source, seasonCode, roster, watchKeys, on
                     if (prev.status === 'live' && next.status === 'final' && mine > theirs && line.pir !== 0) {
                         parts.push(`win bonus +${winBonus(line.pir)}`);
                     }
-                    if (!parts.length && delta === 0) continue;
-                    events.push({
-                        kind: 'player', key, game: game.code, at: now, delta, score,
+                    if (!parts.length && delta === 0) return null;
+                    return {
+                        kind: 'player', key: id, name: line.name, game: game.code, at: now, delta, score,
                         parts, period: next.period, clock: next.clock,
-                    });
+                    };
+                };
+
+                for (const key of watching) {
+                    const line = byKey?.[key];
+                    if (!line) continue;
+                    const event = track(key, line, prev?.byKey?.[key]);
+                    if (event) events.push(event);
+                }
+
+                // The open game's own feed: every line in it, watched or not.
+                if (game.code === focus && box) {
+                    const keyOfLine = new Map(Object.entries(byKey ?? {}).map(([k, l]) => [l.id, k]));
+                    const before = new Map((prev?.lines ?? []).map(l => [l.id, l]));
+                    const plays = [];
+                    for (const line of box.lines) {
+                        const id = keyOfLine.get(line.id) ?? `line:${line.id}`;
+                        const event = track(id, line, before.get(line.id));
+                        if (event) plays.push(event);
+                    }
+                    if (plays.length) gamePlays[game.code] = plays;
                 }
             }
 
             live.current.states = states;
             setGameStates(states);
 
-            if (events.length || historyChanged) {
+            const playCodes = Object.keys(gamePlays);
+            if (events.length || historyChanged || playCodes.length) {
                 const stamped = events.map((e, i) => ({ ...e, id: `${now}-${i}` }));
+                const gameEvents = { ...(live.current.journal?.gameEvents ?? {}) };
+                for (const code of playCodes) {
+                    const fresh = gamePlays[code].map((e, i) => ({ ...e, id: `${now}-g${i}` })).reverse();
+                    gameEvents[code] = [...fresh, ...(gameEvents[code] ?? [])].slice(0, MAX_EVENTS);
+                }
                 const journalNext = {
                     round: live.current.journal?.round ?? null,
                     events: [...stamped.reverse(), ...(live.current.journal?.events ?? [])].slice(0, MAX_EVENTS),
+                    gameEvents,
                     history,
                 };
                 live.current.journal = journalNext;
@@ -333,6 +358,8 @@ export default function useLiveRound({ source, seasonCode, roster, watchKeys, on
         games: roundGames,
         events: journal.events,
         history: journal.history,
+        // Each open game's own feed, everyone in it, by game code.
+        gameEvents: journal.gameEvents ?? {},
         connection,
     };
 }

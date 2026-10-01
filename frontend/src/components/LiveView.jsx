@@ -18,7 +18,8 @@ import WatchCard from './live/WatchCard';
 import { GroupBoard, GroupHeader } from './live/GroupBoard';
 import ActivityFeed from './live/ActivityFeed';
 import LivePicker from './live/LivePicker';
-import GameView from './live/GameView';
+import GameSection from './live/GameSection';
+import { boxscoreName } from '../lib/live/rows';
 import LiveDot from './live/LiveDot';
 
 const SEASON_CODE = `E${CURRENT_SEASON}`;
@@ -200,11 +201,18 @@ export default function LiveView() {
     }), [watch.groups, rowByKey]);
     const group = groups.find(g => g.id === watch.selected.id) ?? groups[0];
     const groupsOf = useCallback((key) => groups.filter(g => g.keys.includes(key)), [groups]);
+    // The open game, if any: the main column shows it in place of the group, and the
+    // feed beside it follows that game rather than your players.
+    const game = live.games.find(g => g.code === openGame) ?? null;
+    const feed = useMemo(
+        () => (game ? (live.gameEvents[game.code] ?? []) : live.events),
+        [game, live.gameEvents, live.events],
+    );
     const lastEvent = useMemo(() => {
         const latest = new Map();
-        for (const e of live.events) if (e.kind === 'player' && !latest.has(e.key)) latest.set(e.key, e);
+        for (const e of feed) if (e.kind === 'player' && !latest.has(e.key)) latest.set(e.key, e);
         return latest;
-    }, [live.events]);
+    }, [feed]);
     const teamNames = useMemo(() => {
         const names = new Map();
         for (const g of live.games) {
@@ -221,7 +229,8 @@ export default function LiveView() {
             .slice(0, 8);
     }, [roster, live.games, group.keys]);
 
-    const nameOf = useCallback((key) => rosterByKey.get(key)?.PlayerName ?? 'Player', [rosterByKey]);
+    const nameOf = useCallback((key, event) => rosterByKey.get(key)?.PlayerName
+        ?? (event?.name ? boxscoreName(event.name) : 'Player'), [rosterByKey]);
     const openPicker = (game = null) => setPicker({ open: true, game });
     const closePicker = useCallback(() => setPicker({ open: false, game: null }), []);
 
@@ -232,7 +241,7 @@ export default function LiveView() {
             round={live.round}
             groups={groups}
             selectedId={group.id}
-            onSelect={watch.select}
+            onSelect={(id) => { watch.select(id); setOpenGame(null); }}
             // A new group is empty by definition, so go straight to filling it.
             onCreate={(name) => { watch.create(name); openPicker(); }}
         />
@@ -307,12 +316,32 @@ export default function LiveView() {
 
             {!loading && (
                 <>
-                    <GameStrip games={live.games} now={now} onOpen={(game) => setOpenGame(game.code)} />
+                    <GameStrip
+                        games={live.games}
+                        now={now}
+                        selectedCode={openGame}
+                        onOpen={(g) => setOpenGame(code => (code === g.code ? null : g.code))}
+                    />
 
                     <div className="grid grid-cols-1 xl:grid-cols-3 gap-5 items-start">
                         {/* On a phone the scoreboard leads; on a wide screen it moves to the side. */}
                         <div className="xl:hidden">{board}</div>
 
+                        {game ? (
+                            <GameSection
+                                key={game.code}
+                                game={game}
+                                roster={roster}
+                                groups={groups}
+                                groupsOf={groupsOf}
+                                history={live.history}
+                                lastEventOf={(key) => lastEvent.get(key)}
+                                now={now}
+                                watch={watch}
+                                onOpenPlayer={(name) => openPlayer(name, CURRENT_SEASON)}
+                                onBack={() => setOpenGame(null)}
+                            />
+                        ) : (
                         <section className="xl:col-span-2 space-y-3">
                             <GroupHeader
                                 key={group.id}
@@ -365,25 +394,19 @@ export default function LiveView() {
                                 </LayoutGroup>
                             )}
                         </section>
+                        )}
 
                         <aside className="space-y-4">
                             <div className="hidden xl:block">{board}</div>
-                            <ActivityFeed events={live.events} nameOf={nameOf} groupsOf={groupsOf} />
+                            <ActivityFeed
+                                title={game ? `${game.homeCode} vs ${game.awayCode}` : null}
+                                events={feed}
+                                nameOf={nameOf}
+                                groupsOf={groupsOf}
+                            />
                         </aside>
                     </div>
                 </>
-            )}
-
-            {openGame !== null && roster && live.games.some(g => g.code === openGame) && (
-                <GameView
-                    game={live.games.find(g => g.code === openGame)}
-                    roster={roster}
-                    groups={groups}
-                    watch={watch}
-                    now={now}
-                    onClose={() => setOpenGame(null)}
-                    onOpenPlayer={(name) => openPlayer(name, CURRENT_SEASON)}
-                />
             )}
 
             {picker.open && roster && (

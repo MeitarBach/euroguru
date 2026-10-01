@@ -115,13 +115,19 @@ function RoleControls({ benched, captain, onToggleBench, onToggleCaptain }) {
  * play rings the card. The card glides when the order changes, so an overtake reads as
  * a move rather than a jump.
  */
-export default function WatchCard({ row, history, lastEvent, now, onRemove, onOpen, onToggleBench, onToggleCaptain, alsoIn = [] }) {
+export default function WatchCard({
+    row, history, lastEvent, now, onRemove, onOpen, onToggleBench, onToggleCaptain, onSelect, menu, alsoIn = [],
+}) {
     const { player, line, state, score, benched, captain, factor, counted, countedPending: pending, countedBonus: bonus } = row;
     const recent = lastEvent && now - lastEvent.at < BUBBLE_MS ? lastEvent : null;
     const bubble = recent ? Math.round(recent.delta * factor * 100) / 100 : 0;
     const glowing = recent && Math.abs(recent.delta) >= BIG_PLAY && now - recent.at < GLOW_MS;
     const points = history ?? [];
     const live = state === 'live';
+    // In a game view a card is a way in: tapping it opens the add-to-group menu. A player
+    // the fantasy game does not price is listed but cannot be added.
+    const unpriced = row.priced === false;
+    const selectable = Boolean(onSelect) && !unpriced;
     const injury = player.InjuryStatus
         ? (String(player.InjuryStatus).toUpperCase().startsWith('OUT') ? 'OUT' : 'GTD')
         : null;
@@ -132,7 +138,10 @@ export default function WatchCard({ row, history, lastEvent, now, onRemove, onOp
             // The same id in either section, so a card glides across when its role changes.
             layoutId={row.key}
             transition={{ type: 'spring', stiffness: 420, damping: 38 }}
+            onClick={selectable ? onSelect : undefined}
             className={`group relative rounded-xl border px-3 py-2.5 transition-shadow duration-500
+                ${unpriced ? 'opacity-50' : ''} ${selectable ? 'cursor-pointer hover:bg-white/[0.06]' : ''}
+                ${menu ? 'z-30' : ''}
                 ${captain ? 'bg-yellow-400/[0.04]' : 'bg-[#ffffff05]'}
                 ${live ? 'border-red-500/25' : captain ? 'border-yellow-400/25' : 'border-white/5'}
                 ${glowing ? 'ring-2 ring-emerald-400/50 shadow-[0_0_28px_-8px_rgba(52,211,153,0.55)]' : ''}`}
@@ -143,20 +152,26 @@ export default function WatchCard({ row, history, lastEvent, now, onRemove, onOp
                         {live && (line?.onCourt
                             ? <span title="On the court"><LiveDot color="green" /></span>
                             : <span title="Off the court" className="h-2 w-2 rounded-full bg-gray-600 shrink-0" />)}
-                        <button
-                            type="button"
-                            onClick={onOpen}
-                            className="text-sm font-semibold text-white truncate hover:text-purple-200 transition-colors"
-                        >
-                            {player.PlayerName}
-                        </button>
+                        {onOpen ? (
+                            <button
+                                type="button"
+                                onClick={onOpen}
+                                className="text-sm font-semibold text-white truncate hover:text-purple-200 transition-colors"
+                            >
+                                {player.PlayerName}
+                            </button>
+                        ) : (
+                            <span className="text-sm font-semibold text-white truncate">{player.PlayerName}</span>
+                        )}
                         {injury && <span className="text-[9px] px-1 rounded bg-red-500/15 text-red-300 shrink-0">{injury}</span>}
                         {alsoIn.map(g => (
                             <span key={g.id} title={`Also in ${g.name}`} className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: g.colorHex }} />
                         ))}
                     </div>
                     <div className="text-[11px] text-gray-500 truncate">
-                        {player.position} · {row.code}{row.opp && <> {row.home ? 'vs' : '@'} {row.opp}</>} · <GameNote row={row} now={now} />
+                        {unpriced
+                            ? <>{row.code} · not in fantasy</>
+                            : <>{player.position} · {row.code}{row.opp && <> {row.home ? 'vs' : '@'} {row.opp}</>} · <GameNote row={row} now={now} /></>}
                     </div>
                 </div>
 
@@ -196,25 +211,27 @@ export default function WatchCard({ row, history, lastEvent, now, onRemove, onOp
                     </span>
                 </div>
 
-                <button
+                {onRemove && <button
                     type="button"
                     onClick={onRemove}
                     aria-label={`Remove ${player.PlayerName} from this group`}
                     className="p-1 -mr-1.5 -mt-0.5 rounded-md text-gray-600 hover:text-white hover:bg-[#ffffff0a] transition-colors md:opacity-0 md:group-hover:opacity-100 focus:opacity-100"
                 >
                     <X size={13} />
-                </button>
+                </button>}
             </div>
 
             {line && !line.dnp ? (
                 <div className="mt-1.5 flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0">
-                        <RoleControls
-                            benched={benched}
-                            captain={captain}
-                            onToggleBench={onToggleBench}
-                            onToggleCaptain={onToggleCaptain}
-                        />
+                        {onToggleBench && (
+                            <RoleControls
+                                benched={benched}
+                                captain={captain}
+                                onToggleBench={onToggleBench}
+                                onToggleCaptain={onToggleCaptain}
+                            />
+                        )}
                         <StatLine line={line} />
                     </div>
                     {points.length > 2 && (
@@ -231,15 +248,18 @@ export default function WatchCard({ row, history, lastEvent, now, onRemove, onOp
                 </div>
             ) : (
                 <div className="mt-1.5 flex items-center gap-2 text-[11px] text-gray-600">
-                    <RoleControls
-                        benched={benched}
-                        captain={captain}
-                        onToggleBench={onToggleBench}
-                        onToggleCaptain={onToggleCaptain}
-                    />
-                    {PLACEHOLDER[state]}
+                    {onToggleBench && (
+                        <RoleControls
+                            benched={benched}
+                            captain={captain}
+                            onToggleBench={onToggleBench}
+                            onToggleCaptain={onToggleCaptain}
+                        />
+                    )}
+                    {PLACEHOLDER[state] ?? (state === 'upcoming' && row.avg !== null ? `${player.CR} CR` : null)}
                 </div>
             )}
+            {menu}
         </MotionDiv>
     );
 }

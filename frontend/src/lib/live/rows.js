@@ -50,6 +50,49 @@ export function watchRow(player, games) {
     };
 }
 
+/** The boxscore's "KALAITZAKIS, PANAGIOTIS" as "P. Kalaitzakis". */
+export function boxscoreName(name) {
+    const title = (s) => s.toLowerCase().replace(/\b\p{L}/gu, c => c.toUpperCase());
+    const [last, first] = String(name ?? '').split(',').map(s => s.trim());
+    return first ? `${first.charAt(0)}. ${title(last)}` : title(last ?? '');
+}
+
+/**
+ * One game as cards, per team: every priced player (as watchRow sees them) plus every
+ * boxscore line the fantasy game does not price, as rows of the same shape with
+ * `priced: false` and a "line:<id>" key. `missing` holds priced players who are not in
+ * tonight's boxscore.
+ */
+export function gameRows(game, roster) {
+    const matched = new Set(Object.values(game.byKey ?? {}).map(l => l.id));
+    return [game.homeCode, game.awayCode].map(code => {
+        const home = code === game.homeCode;
+        const mine = home ? game.scoreHome : game.scoreAway;
+        const theirs = home ? game.scoreAway : game.scoreHome;
+        const priced = roster
+            .filter(p => euroleagueCode(p) === code)
+            .map(p => ({ ...watchRow(p, [game]), priced: true }));
+        const unpriced = (game.lines ?? [])
+            .filter(l => l.code === code && !matched.has(l.id))
+            .map(line => ({
+                key: `line:${line.id}`,
+                player: { PlayerName: boxscoreName(line.name), position: '', PlayerKey: null },
+                priced: false, code, game, home, opp: home ? game.awayCode : game.homeCode, mine, theirs,
+                avg: null, line, pending: 0, bonus: 0,
+                state: line.dnp ? (game.status === 'final' ? 'dnp' : 'idle') : game.status,
+                score: line.dnp ? null : scoreOf(line, game, code),
+            }));
+        const rows = sortRows([...priced, ...unpriced].map(r => inGroup(r, 'starter')));
+        return {
+            code,
+            name: home ? game.homeName : game.awayName,
+            score: mine,
+            rows: rows.filter(r => r.state !== 'out'),
+            missing: rows.filter(r => r.state === 'out'),
+        };
+    });
+}
+
 // What a fantasy lineup role is worth: a bench player scores half, the captain double.
 export const ROLE_FACTOR = { starter: 1, captain: 2, bench: 0.5 };
 const round2 = (x) => Math.round(x * 100) / 100;
