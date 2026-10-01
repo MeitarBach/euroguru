@@ -133,21 +133,26 @@ export default function useWatchGroups() {
         return group?.keys.includes(key) ? remove(groupId, key) : add(groupId, key);
     }, [groups, add, remove]);
 
-    const create = useCallback((name) => {
+    // `keys` seeds the group - a player picked in the game view goes straight in, subject
+    // to the same free limit as any other add.
+    const create = useCallback((name, keys = []) => {
         const used = new Set(groups.map(g => g.color));
         const color = GROUP_COLORS.findIndex((_, i) => !used.has(i));
+        const fresh = keys.filter(k => !allKeys.includes(k));
+        const allowed = locked ? Math.max(0, FREE_WATCH_LIMIT - allKeys.length) : Infinity;
+        if (fresh.length > allowed) unlock(`Watch more than ${FREE_WATCH_LIMIT} players`);
         const group = {
             id: `g-${Date.now().toString(36)}`,
             name: cleanName(name, `Group ${groups.length + 1}`),
             color: color === -1 ? groups.length % GROUP_COLORS.length : color,
-            keys: [],
+            keys: keys.filter(k => allKeys.includes(k) || fresh.indexOf(k) < allowed),
             bench: [],
             captain: null,
         };
         save([...groups, group]);
         select(group.id);
         return group.id;
-    }, [groups, save, select]);
+    }, [groups, allKeys, locked, unlock, save, select]);
 
     const rename = useCallback((groupId, name) => {
         save(groups.map(g => (g.id === groupId ? { ...g, name: cleanName(name, g.name) } : g)));

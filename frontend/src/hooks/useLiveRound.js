@@ -58,13 +58,14 @@ function indexLines(lines, rosterByCode) {
  * The live state of one round, polled from `source`.
  *
  * Polls only what is needed: a game's header once it is near tip-off, its boxscore only
- * while a watched player is in it, and a finished game exactly once. Slows down while
+ * while a watched player is in it or it is open in the game view (`focusCode`), and a
+ * finished game exactly once. Slows down while
  * the page is hidden and catches up the moment it is shown again; backs off on failures.
  *
  * Also turns successive boxscores into a feed of events and an FPT history per watched
  * player, both kept in sessionStorage so a reload mid-game keeps them.
  */
-export default function useLiveRound({ source, seasonCode, roster, watchKeys, onEvents }) {
+export default function useLiveRound({ source, seasonCode, roster, watchKeys, onEvents, focusCode = null }) {
     const [schedule, setSchedule] = useState(null);
     const [scheduleError, setScheduleError] = useState(null);
     const [gameStates, setGameStates] = useState({});
@@ -116,7 +117,7 @@ export default function useLiveRound({ source, seasonCode, roster, watchKeys, on
     // has to restart when a player is added or the roster lands.
     const live = useRef({});
     useEffect(() => {
-        live.current = { ...live.current, source, games, rosterByCode, watchedCodes, watchKeys, onEvents };
+        live.current = { ...live.current, source, games, rosterByCode, watchedCodes, watchKeys, onEvents, focusCode };
     });
 
     // Restore this round's feed and sparklines from earlier in the session.
@@ -133,7 +134,7 @@ export default function useLiveRound({ source, seasonCode, roster, watchKeys, on
         try {
             window.sessionStorage.setItem(
                 storageKey(seasonCode, journal.round),
-                JSON.stringify({ events: journal.events, history: journal.history }),
+                JSON.stringify({ events: journal.events, gameEvents: journal.gameEvents ?? {}, history: journal.history }),
             );
         } catch { /* the feed just will not survive a reload */ }
     }, [seasonCode, journal]);
@@ -149,7 +150,9 @@ export default function useLiveRound({ source, seasonCode, roster, watchKeys, on
         let failures = 0;
 
         const tick = async () => {
-            const { source: src, games: roundGames, rosterByCode: rosters, watchedCodes: codes, watchKeys: keys } = live.current;
+            const {
+                source: src, games: roundGames, rosterByCode: rosters, watchedCodes: codes, watchKeys: keys, focusCode: focus,
+            } = live.current;
             const prevStates = live.current.states ?? {};
             const now = Date.now();
             const watching = new Set(keys);
@@ -157,7 +160,8 @@ export default function useLiveRound({ source, seasonCode, roster, watchKeys, on
             const due = roundGames.filter(g => now >= g.tipoff - NEAR_TIPOFF_MS);
             const results = await Promise.allSettled(due.map(async (game) => {
                 const prev = prevStates[game.code];
-                const watched = codes.has(game.homeCode) || codes.has(game.awayCode);
+                // The game open in the game view needs its boxscore too, watched or not.
+                const watched = codes.has(game.homeCode) || codes.has(game.awayCode) || game.code === focus;
                 if (prev?.status === 'final' && (prev.byKey || !watched)) return null;
 
                 const header = prev?.status === 'final' ? prev : await src.header(game);
@@ -167,6 +171,7 @@ export default function useLiveRound({ source, seasonCode, roster, watchKeys, on
 
             const states = { ...prevStates };
             const events = [];
+            const gamePlays = {};
             const history = { ...(live.current.journal?.history ?? {}) };
             let historyChanged = false;
             let ok = 0;
@@ -192,6 +197,8 @@ export default function useLiveRound({ source, seasonCode, roster, watchKeys, on
                     clock: header.clock ?? null,
                     lastModified: Math.max(header.lastModified ?? 0, box?.lastModified ?? 0) || null,
                     byKey,
+                    // Every line, priced or not: the game view lists the whole game.
+                    lines: box ? box.lines : prev?.lines,
                 };
                 states[game.code] = next;
 
@@ -208,21 +215,18 @@ export default function useLiveRound({ source, seasonCode, roster, watchKeys, on
                     events.push({ kind: 'final', game: game.code, at: now, text: `Final: ${label}` });
                 }
 
-                for (const key of watching) {
-                    const line = byKey?.[key];
-                    if (!line) continue;
+                // One player's change since the last poll: the sparkline point, and an
+                // event when something happened. `id` is a PlayerKey, or "line:<id>" for
+                // a player the fantasy game does not price.
+                const track = (id, line, before) => {
                     const code = line.code;
                     const score = scoreOf(line, view, code);
-                    const before = prev?.byKey?.[key];
-
-                    // The sparkline: one point per change, starting from zero at tip-off.
-                    const points = history[key] ?? (next.status !== 'final' ? [0] : []);
+                    const points = history[id] ?? (next.status !== 'final' ? [0] : []);
                     if (points[points.length - 1] !== score) {
-                        history[key] = [...points, score].slice(-MAX_HISTORY);
+                        history[id] = [...points, score].slice(-MAX_HISTORY);
                         historyChanged = true;
                     }
-
-                    if (!before) continue;
+                    if (!before) return null;
                     const prevScore = scoreOf(before, { ...game, ...prev }, code);
                     const delta = round1(score - prevScore);
                     const parts = STAT_PARTS
@@ -236,22 +240,49 @@ export default function useLiveRound({ source, seasonCode, roster, watchKeys, on
                     if (prev.status === 'live' && next.status === 'final' && mine > theirs && line.pir !== 0) {
                         parts.push(`win bonus +${winBonus(line.pir)}`);
                     }
-                    if (!parts.length && delta === 0) continue;
-                    events.push({
-                        kind: 'player', key, game: game.code, at: now, delta, score,
+                    if (!parts.length && delta === 0) return null;
+                    return {
+                        kind: 'player', key: id, name: line.name, game: game.code, at: now, delta, score,
                         parts, period: next.period, clock: next.clock,
-                    });
+                    };
+                };
+
+                for (const key of watching) {
+                    const line = byKey?.[key];
+                    if (!line) continue;
+                    const event = track(key, line, prev?.byKey?.[key]);
+                    if (event) events.push(event);
+                }
+
+                // The open game's own feed: every line in it, watched or not.
+                if (game.code === focus && box) {
+                    const keyOfLine = new Map(Object.entries(byKey ?? {}).map(([k, l]) => [l.id, k]));
+                    const before = new Map((prev?.lines ?? []).map(l => [l.id, l]));
+                    const plays = [];
+                    for (const line of box.lines) {
+                        const id = keyOfLine.get(line.id) ?? `line:${line.id}`;
+                        const event = track(id, line, before.get(line.id));
+                        if (event) plays.push(event);
+                    }
+                    if (plays.length) gamePlays[game.code] = plays;
                 }
             }
 
             live.current.states = states;
             setGameStates(states);
 
-            if (events.length || historyChanged) {
+            const playCodes = Object.keys(gamePlays);
+            if (events.length || historyChanged || playCodes.length) {
                 const stamped = events.map((e, i) => ({ ...e, id: `${now}-${i}` }));
+                const gameEvents = { ...(live.current.journal?.gameEvents ?? {}) };
+                for (const code of playCodes) {
+                    const fresh = gamePlays[code].map((e, i) => ({ ...e, id: `${now}-g${i}` })).reverse();
+                    gameEvents[code] = [...fresh, ...(gameEvents[code] ?? [])].slice(0, MAX_EVENTS);
+                }
                 const journalNext = {
                     round: live.current.journal?.round ?? null,
                     events: [...stamped.reverse(), ...(live.current.journal?.events ?? [])].slice(0, MAX_EVENTS),
+                    gameEvents,
                     history,
                 };
                 live.current.journal = journalNext;
@@ -311,6 +342,8 @@ export default function useLiveRound({ source, seasonCode, roster, watchKeys, on
     // rather than at the next scheduled poll.
     const watchSignature = watchKeys.join('|');
     useEffect(() => { wake.current(); }, [watchSignature]);
+    // Opening a game in the game view fetches it at once, too.
+    useEffect(() => { wake.current(); }, [focusCode]);
 
     const roundGames = useMemo(
         () => games.map(g => ({ ...g, status: 'scheduled', ...gameStates[g.code] })),
@@ -325,6 +358,8 @@ export default function useLiveRound({ source, seasonCode, roster, watchKeys, on
         games: roundGames,
         events: journal.events,
         history: journal.history,
+        // Each open game's own feed, everyone in it, by game code.
+        gameEvents: journal.gameEvents ?? {},
         connection,
     };
 }

@@ -12,11 +12,11 @@ function When({ event }) {
 }
 
 /** What just happened to your players, newest first, dotted with the groups they are in. */
-export default function ActivityFeed({ events, nameOf, groupsOf }) {
+export default function ActivityFeed({ events, nameOf, groupsOf, title }) {
     return (
         <div className="glass-panel p-4">
             <h3 className="font-semibold text-gray-200 flex items-center gap-2 mb-3">
-                <Zap size={16} className="text-amber-300" /> Activity
+                <Zap size={16} className="text-amber-300" /> {title ? `${title} · plays` : 'Activity'}
             </h3>
             {events.length === 0 ? (
                 <p className="text-sm text-gray-500">
@@ -37,7 +37,7 @@ export default function ActivityFeed({ events, nameOf, groupsOf }) {
                                 <When event={event} />
                                 {event.kind === 'player' ? (
                                     <span className="min-w-0 flex-1 text-gray-300">
-                                        <span className="text-white font-medium">{surnameOf(nameOf(event.key))}</span>
+                                        <span className="text-white font-medium">{surnameOf(nameOf(event.key, event))}</span>
                                         {groupsOf(event.key).map(g => (
                                             <span
                                                 key={g.id}
