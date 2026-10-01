@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Analytics } from '@vercel/analytics/react';
 import Sidebar from './components/Sidebar';
 import MobileNav from './components/MobileNav';
 import MobileHeader from './components/MobileHeader';
@@ -50,6 +51,7 @@ function App() {
         <MobileNav activeTab={activeTab} setActiveTab={setActiveTab} />
       </div>
     </PlayerDetailProvider>
+    <Analytics />
     </AuthProvider>
   );
 }
