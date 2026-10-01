@@ -18,6 +18,9 @@ import AuthModal from '../components/AuthModal';
 export function AuthProvider({ children }) {
     const [session, setSession] = useState(null);
     const [open, setOpen] = useState(false);
+    // What the user was reaching for when a gate raised the modal, so it can say
+    // "See all 20 picks" instead of a generic welcome. Null from the sidebar button.
+    const [reason, setReason] = useState(null);
     // Only ever true while a configured client is still reporting its first session.
     const [loading, setLoading] = useState(Boolean(auth));
 
@@ -35,7 +38,12 @@ export function AuthProvider({ children }) {
         return () => data.subscription.unsubscribe();
     }, []);
 
-    const openAuth = useCallback(() => setOpen(true), []);
+    // Called straight from onClick too, so anything that is not a string - a click
+    // event - counts as no reason.
+    const openAuth = useCallback((why) => {
+        setReason(typeof why === 'string' ? why : null);
+        setOpen(true);
+    }, []);
     const closeAuth = useCallback(() => setOpen(false), []);
 
     const signIn = useCallback(async (email, password) => {
@@ -89,7 +97,7 @@ export function AuthProvider({ children }) {
     return (
         <AuthContext.Provider value={value}>
             {children}
-            {open && <AuthModal onClose={closeAuth} />}
+            {open && <AuthModal reason={reason} onClose={closeAuth} />}
         </AuthContext.Provider>
     );
 }

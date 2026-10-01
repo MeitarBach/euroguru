@@ -49,6 +49,24 @@ export function useAuth() {
     return isConfigured ? ctx : { ...ctx, available: false };
 }
 
+/**
+ * Whether signed-out limits apply here, and how to lift them.
+ *
+ * `locked` is false while the first session is still loading, so a signed-in user
+ * never sees the locks flash on and off on a reload, and false in a build with no
+ * Supabase config, where there would be no way to sign in and unlock them.
+ *
+ * The limits are presentation only: the API still answers every request in full. They
+ * exist to show what an account unlocks, not to protect the data.
+ */
+export function useGate() {
+    const { user, loading, available, openAuth } = useAuth();
+    return {
+        locked: available && !loading && !user,
+        unlock: openAuth,
+    };
+}
+
 /** Initials for an avatar bubble: "sasha.vezenkov@gmail.com" -> "SV". */
 export function initialsFor(user) {
     const email = user?.email ?? '';

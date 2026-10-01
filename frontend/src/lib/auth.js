@@ -25,8 +25,10 @@ export const isConfigured = Boolean(url && key);
  * half. auth-js is Supabase's own package, ships in lockstep with supabase-js, and is
  * precisely what supabase-js wraps here.
  *
- * Switch back to supabase-js the day this app reads a Supabase table directly; running
- * two clients side by side would be the worse of both.
+ * The app now reads two Supabase tables (user settings and charts), and does so with
+ * @supabase/postgrest-js beside this - see lib/db.js. That is still two of supabase-js's
+ * five clients, imported directly, rather than the umbrella and the three we never use.
+ * Revisit if realtime or storage ever join them.
  *
  * The options below are the ones supabase-js would have passed on our behalf. The
  * interesting one is detectSessionInUrl: it consumes the ?code= that Google sends us

@@ -1,3 +1,5 @@
+import { prefChanged, SYNCED_KEYS } from './lib/prefs';
+
 // Column metadata shared by the stats table and the Court Vision axis pickers.
 //   aggKey    - field when showing averages; key - field in raw (per-game) mode
 //   fmt       - 'num' 1dp, 'pct' appends %, 'sign' shows +/-, 'text' verbatim
@@ -84,6 +86,7 @@ export const storeColumns = (ids) => {
     } catch {
         /* not fatal - the choice just will not survive a reload */
     }
+    prefChanged();
 };
 
 const ALWAYS_SHOWN = new Set(['PlayerName', 'position', 'Team', 'CR', 'Score', 'Games']);
@@ -152,6 +155,7 @@ export const storeValue = (key, value) => {
     try {
         window.localStorage.setItem(key, JSON.stringify(value));
     } catch { /* ignore */ }
+    if (SYNCED_KEYS.includes(key)) prefChanged();
 };
 
 /** Columns usable as an axis of the given kind, given what the rows actually contain. */

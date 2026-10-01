@@ -1,5 +1,7 @@
 import React from 'react';
+import { Lock } from 'lucide-react';
 import { NAV_ITEMS } from '../navigation';
+import { useGate } from '../hooks/authContext';
 
 /**
  * Bottom tab bar, below md only.
@@ -11,6 +13,7 @@ import { NAV_ITEMS } from '../navigation';
  * Opaque for the same reason the sidebar is: content scrolls underneath it.
  */
 export default function MobileNav({ activeTab, setActiveTab }) {
+    const { locked } = useGate();
     return (
         <nav
             className="md:hidden fixed bottom-0 inset-x-0 z-40 flex border-t border-[#ffffff10]
@@ -32,7 +35,12 @@ export default function MobileNav({ activeTab, setActiveTab }) {
                                 ? 'text-purple-300'
                                 : 'text-gray-500 hover:text-gray-300'}`}
                     >
-                        <Icon size={20} />
+                        <span className="relative">
+                            <Icon size={20} />
+                            {locked && item.gated && (
+                                <Lock size={9} className="absolute -top-1 -right-2 text-gray-500" aria-label="Preview until you sign in" />
+                            )}
+                        </span>
                         <span className="text-[10px] font-medium leading-none">{item.short}</span>
                     </button>
                 );

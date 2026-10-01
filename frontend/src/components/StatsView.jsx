@@ -15,6 +15,13 @@ import {
     loadStoredColumns, storeColumns,
 } from '../columns';
 import { useIsNarrow } from '../hooks/useMediaQuery';
+import { useGate } from '../hooks/authContext';
+import { GateFade, LockedControl } from './Gate';
+import { PREVIEW_ROWS, BLURRED_ROWS, BLURRED_ROW } from '../lib/gate';
+import usePrefsSynced from '../hooks/usePrefsSynced';
+
+// What a signed-out visitor sees: the server's order, unsortable.
+const SERVER_ORDER = { key: null, direction: 'desc' };
 
 const SortIcon = ({ column, sortConfig }) => {
     if (sortConfig.key !== column) return <div className="w-4 h-4 inline-block ml-1 opacity-20">↕</div>;
@@ -76,6 +83,7 @@ export default function StatsView() {
     const [scoreMetric, setScoreMetric] = useState('PIR');
 
     const [selectedColumns, setSelectedColumns] = useState(loadStoredColumns);
+    usePrefsSynced(() => setSelectedColumns(loadStoredColumns()));
     // The modal is shared app-wide now, so this view only needs the opener.
     const openPlayer = useOpenPlayer();
     // Content, not styling: on a phone the given name is abbreviated and the team
@@ -91,7 +99,19 @@ export default function StatsView() {
     // already sorted by score - the previous default named a raw-mode key that does
     // not exist on aggregated rows, so every comparison hit the null branch and the
     // comparator became inconsistent.
-    const [sortConfig, setSortConfig] = useState({ key: null, direction: 'desc' });
+    const [sortConfig, setSortConfig] = useState(SERVER_ORDER);
+
+    // Signed out, the table is a fixed preview: this season, every position, the full
+    // price range, season averages, the default columns, in score order. Derived from
+    // the real state rather than written over it, so the choices someone made before
+    // signing out are still there when they sign back in.
+    const { locked, unlock } = useGate();
+    const view = locked
+        ? { ...filters, season: CURRENT_SEASON, position: 'All',
+            min_cr: options.min_cr_limit, max_cr: options.max_cr_limit }
+        : filters;
+    const games = locked ? 100 : aggregation;
+    const sort = locked ? SERVER_ORDER : sortConfig;
 
     // Sliders fire per drag step, so fetches follow the settled values while the
     // controls themselves stay live.
@@ -104,8 +124,8 @@ export default function StatsView() {
     // Load initial filters options
     useEffect(() => {
         setFiltersReady(false);
-        loadFilters(filters.season);
-    }, [filters.season]);
+        loadFilters(view.season);
+    }, [view.season]);
 
     const loadFilters = async (season) => {
         const data = await fetchFilters(season);
@@ -149,17 +169,17 @@ export default function StatsView() {
     useEffect(() => {
         if (!filtersReady || !settled) return;
         loadTableStats();
-    }, [filtersReady, settled, filters.season, filters.position, minCr, maxCr, aggregation]);
+    }, [filtersReady, settled, locked, view.season, view.position, minCr, maxCr, games]);
 
     const loadTableStats = async () => {
         const seq = ++requestSeq.current;
         setLoading(true);
         const params = {
-            season: filters.season,
-            position: filters.position,
-            min_cr: minCr,
-            max_cr: maxCr,
-            last_x_games: aggregation
+            season: view.season,
+            position: view.position,
+            min_cr: locked ? view.min_cr : minCr,
+            max_cr: locked ? view.max_cr : maxCr,
+            last_x_games: games
         };
 
         const data = await fetchStats(params);
@@ -184,7 +204,7 @@ export default function StatsView() {
     // than label a single score "Avg".
     const headerFor = (col) => {
         const label = columnLabel(col, true, scoreMetric);
-        return aggregation === 1 && typeof label === 'string'
+        return games === 1 && typeof label === 'string'
             ? label.replace(/^Avg\s+/, '')
             : label;
     };
@@ -193,10 +213,10 @@ export default function StatsView() {
     // including renders caused only by the loading flag toggling.
     const sortedPlayers = useMemo(() => {
         let sortableItems = [...players];
-        if (sortConfig.key !== null) {
+        if (sort.key !== null) {
             sortableItems.sort((a, b) => {
-                let aValue = a[sortConfig.key];
-                let bValue = b[sortConfig.key];
+                let aValue = a[sort.key];
+                let bValue = b[sort.key];
 
                 // Handle numeric conversions if needed (though API returns mixed, usually numbers are numbers)
                 // For aggregation fields which are strings sometimes or numbers
@@ -212,16 +232,22 @@ export default function StatsView() {
                 if (bMissing) return -1;
 
                 if (aValue < bValue) {
-                    return sortConfig.direction === 'asc' ? -1 : 1;
+                    return sort.direction === 'asc' ? -1 : 1;
                 }
                 if (aValue > bValue) {
-                    return sortConfig.direction === 'asc' ? 1 : -1;
+                    return sort.direction === 'asc' ? 1 : -1;
                 }
                 return 0;
             });
         }
         return sortableItems;
-    }, [players, sortConfig]);
+    }, [players, sort]);
+
+    // The preview rows in full, then a few blurred ones so the wall visibly sits on
+    // top of real data rather than at the end of it.
+    const shownPlayers = locked
+        ? sortedPlayers.slice(0, PREVIEW_ROWS.stats + BLURRED_ROWS)
+        : sortedPlayers;
 
     // Which columns this season can actually fill. 2024 never recorded assists or
     // shooting splits, and the fantasy-sourced season has no minutes at all, so those
@@ -238,11 +264,12 @@ export default function StatsView() {
         return ids;
     }, [players, aggregation]);
 
+    const shownColumnIds = locked ? DEFAULT_COLUMN_IDS : selectedColumns;
     const visibleColumns = useMemo(
         () => COLUMNS.filter(col =>
-            (col.locked || selectedColumns.includes(col.id)) && availableColumns.has(col.id)
+            (col.locked || shownColumnIds.includes(col.id)) && availableColumns.has(col.id)
         ),
-        [selectedColumns, availableColumns]
+        [shownColumnIds, availableColumns]
     );
 
     const chooseColumns = (ids) => {
@@ -268,56 +295,64 @@ export default function StatsView() {
 
             {/* Filters Bar */}
             <div className="glass-panel p-4 flex flex-wrap items-center gap-4">
-                <div className="flex flex-col gap-1">
-                    <label className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Season</label>
-                    <select
-                        value={filters.season}
-                        onChange={handleSeasonChange}
-                        className="input-dark bg-[#0a0a0c] min-w-[100px]"
-                    >
-                        {SEASONS.map(s => (
-                            <option key={s.value} value={s.value}>{s.label}</option>
-                        ))}
-                    </select>
-                </div>
+                <LockedControl reason="Browse past seasons">
+                    <div className="flex flex-col gap-1">
+                        <label className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Season</label>
+                        <select
+                            value={view.season}
+                            onChange={handleSeasonChange}
+                            className="input-dark bg-[#0a0a0c] min-w-[100px]"
+                        >
+                            {SEASONS.map(s => (
+                                <option key={s.value} value={s.value}>{s.label}</option>
+                            ))}
+                        </select>
+                    </div>
+                </LockedControl>
 
-                <GamesWindowSelect value={aggregation} onChange={setAggregation} />
+                <LockedControl reason="Average over recent games">
+                    <GamesWindowSelect value={games} onChange={setAggregation} />
+                </LockedControl>
 
-                <div className="flex flex-col gap-1">
-                    <label className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Position</label>
-                    <select
-                        value={filters.position}
-                        onChange={(e) => setFilters(prev => ({ ...prev, position: e.target.value }))}
-                        className="input-dark bg-[#0a0a0c] min-w-[120px]"
-                    >
-                        {options.positions.map(p => (
-                            <option key={p} value={p}>{p}</option>
-                        ))}
-                    </select>
-                </div>
+                <LockedControl reason="Filter by position">
+                    <div className="flex flex-col gap-1">
+                        <label className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Position</label>
+                        <select
+                            value={view.position}
+                            onChange={(e) => setFilters(prev => ({ ...prev, position: e.target.value }))}
+                            className="input-dark bg-[#0a0a0c] min-w-[120px]"
+                        >
+                            {options.positions.map(p => (
+                                <option key={p} value={p}>{p}</option>
+                            ))}
+                        </select>
+                    </div>
+                </LockedControl>
 
-                {(
+                <LockedControl reason="Choose your own columns">
                     <div className="flex flex-col gap-1">
                         <label className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Columns</label>
                         <ColumnPicker
                             columns={COLUMNS}
                             categories={COLUMN_CATEGORIES}
-                            selected={selectedColumns}
+                            selected={shownColumnIds}
                             available={availableColumns}
                             onChange={chooseColumns}
                             onReset={resetColumns}
                             defaultIds={DEFAULT_COLUMN_IDS}
                         />
                     </div>
-                )}
+                </LockedControl>
 
-                <CrRangeSlider
-                    min={filters.min_cr}
-                    max={filters.max_cr}
-                    limitMin={options.min_cr_limit}
-                    limitMax={options.max_cr_limit}
-                    onChange={({ min, max }) => setFilters(prev => ({ ...prev, min_cr: min, max_cr: max }))}
-                />
+                <LockedControl reason="Filter by price">
+                    <CrRangeSlider
+                        min={view.min_cr}
+                        max={view.max_cr}
+                        limitMin={options.min_cr_limit}
+                        limitMax={options.max_cr_limit}
+                        onChange={({ min, max }) => setFilters(prev => ({ ...prev, min_cr: min, max_cr: max }))}
+                    />
+                </LockedControl>
             </div>
 
             {loading && players.length === 0 && (
@@ -339,21 +374,23 @@ export default function StatsView() {
                                             sortKey={columnKey(col, true)}
                                             align={col.align}
                                             info={columnInfo(col, scoreMetric)}
-                                            sortConfig={sortConfig}
-                                            onSort={requestSort}
+                                            sortConfig={sort}
+                                            onSort={locked ? () => unlock('Sort by any stat') : requestSort}
                                             sticky={col.fmt === 'player'}
                                         />
                                     ))}
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-[#ffffff08]">
-                                    {sortedPlayers.map((player, idx) => (
+                                    {shownPlayers.map((player, idx) => (
                                         <tr
                                             key={`${player.PlayerID ?? player.PlayerName ?? 'row'}-${idx}`}
-                                            onClick={() => openPlayer(player.PlayerName, filters.season)}
+                                            onClick={() => openPlayer(player.PlayerName, view.season)}
+                                            aria-hidden={locked && idx >= PREVIEW_ROWS.stats ? true : undefined}
                                             // `group` so the sticky cell can follow the row's hover; it paints
                                             // its own opaque background and would otherwise ignore it.
-                                            className="group hover:bg-[#ffffff03] transition-colors cursor-pointer"
+                                            className={`group hover:bg-[#ffffff03] transition-colors cursor-pointer ${
+                                                locked && idx >= PREVIEW_ROWS.stats ? BLURRED_ROW : ''}`}
                                         >
                                             {visibleColumns.map(col => {
                                                 const value = player[columnKey(col, true)];
@@ -404,6 +441,9 @@ export default function StatsView() {
                             </tbody>
                         </table>
                     </div>
+                    {locked && sortedPlayers.length > PREVIEW_ROWS.stats && (
+                        <GateFade title={`See all ${sortedPlayers.length} players`} />
+                    )}
                 </div>
             )}
         </div>

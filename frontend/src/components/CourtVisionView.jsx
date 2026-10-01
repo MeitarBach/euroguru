@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { fetchFilters, fetchStats } from '../services/api';
 import { useOpenPlayer } from '../hooks/playerDetailContext';
-import { Plus, Trash2, ChevronDown, ChevronRight, GripVertical } from 'lucide-react';
+import { Plus, Trash2, ChevronDown, ChevronRight, GripVertical, Lock } from 'lucide-react';
 import useDebouncedValue from '../hooks/useDebouncedValue';
 import { COLUMNS, columnKey, columnLabel, loadStored, storeValue } from '../columns';
 import ChartCanvas from './charts/ChartCanvas';
@@ -9,6 +9,9 @@ import ChartBuilderModal from './ChartBuilderModal';
 import CrRangeSlider from './CrRangeSlider';
 import GamesWindowSelect from './GamesWindowSelect';
 import { SEASONS, CURRENT_SEASON } from '../seasons';
+import { useGate } from '../hooks/authContext';
+import { LockedControl } from './Gate';
+import usePrefsSynced from '../hooks/usePrefsSynced';
 
 const CHARTS_STORAGE_KEY = 'euroguru.courtVision.charts';
 
@@ -81,16 +84,28 @@ export default function CourtVisionView() {
     const [loading, setLoading] = useState(false);
 
     const [charts, setCharts] = useState(initialCharts);
+    usePrefsSynced(() => setCharts(initialCharts()));
     const [building, setBuilding] = useState(false);
     const [dragId, setDragId] = useState(null);
     const [dropId, setDropId] = useState(null);
+
+    // Signed out, the tab shows the stock charts over this season with no filters, and
+    // only the first of them is drawn. Derived rather than written over the real
+    // state, so a signed-in user's own charts and filters come back intact.
+    const { locked, unlock } = useGate();
+    const view = locked
+        ? { ...filters, season: CURRENT_SEASON, position: 'All',
+            min_cr: options.min_cr_limit, max_cr: options.max_cr_limit }
+        : filters;
+    const games = locked ? 100 : aggregation;
+    const shownCharts = locked ? BUILT_INS : charts;
 
     const openPlayer = useOpenPlayer();
     // Bound to the season in view, and passed only to saved charts - the builder's
     // preview leaves it undefined so its points stay inert.
     const openChartPlayer = useCallback(
-        (name) => openPlayer(name, filters.season),
-        [openPlayer, filters.season]
+        (name) => openPlayer(name, view.season),
+        [openPlayer, view.season]
     );
 
     const minCr = useDebouncedValue(filters.min_cr);
@@ -105,11 +120,11 @@ export default function CourtVisionView() {
         // Field order matches StatsView's loadTableStats so the api.js cache key
         // (JSON.stringify of the params) matches and the two tabs share a response.
         fetchStats({
-            season: filters.season,
-            position: filters.position,
-            min_cr: minCr,
-            max_cr: maxCr,
-            last_x_games: aggregation,
+            season: view.season,
+            position: view.position,
+            min_cr: locked ? view.min_cr : minCr,
+            max_cr: locked ? view.max_cr : maxCr,
+            last_x_games: games,
         }).then(data => {
             done = true;
             if (seq !== requestSeq.current) return;
@@ -130,7 +145,7 @@ export default function CourtVisionView() {
     // change a cancellation path so a slow response cannot overwrite a newer one.
     useEffect(() => {
         let alive = true;
-        const season = filters.season;
+        const season = view.season;
         fetchFilters(season).then(data => {
             if (!alive) return;
             if (data) {
@@ -150,17 +165,17 @@ export default function CourtVisionView() {
             setLoadedSeason(season);
         });
         return () => { alive = false; };
-    }, [filters.season]);
+    }, [view.season]);
 
     // Derived rather than stored: options belong to whichever season last loaded.
-    const filtersReady = loadedSeason === filters.season;
+    const filtersReady = loadedSeason === view.season;
 
     const settled = minCr === filters.min_cr && maxCr === filters.max_cr;
 
     useEffect(() => {
         if (!filtersReady || !settled) return;
         loadRows();
-    }, [filtersReady, settled, filters.season, filters.position, minCr, maxCr, aggregation]);
+    }, [filtersReady, settled, locked, view.season, view.position, minCr, maxCr, games]);
 
     // Which columns this season can actually fill, so an axis that would plot
     // nothing is offered as disabled rather than silently producing an empty chart.
@@ -241,47 +256,55 @@ export default function CourtVisionView() {
                     </p>
                 </div>
                 <button
-                    onClick={() => setBuilding(true)}
+                    onClick={locked ? () => unlock('Build your own charts') : () => setBuilding(true)}
                     className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border transition-colors
                                bg-purple-600/20 text-purple-300 border-purple-500/40 hover:bg-purple-600/30"
                 >
-                    <Plus size={15} /> New chart
+                    {locked ? <Lock size={14} /> : <Plus size={15} />} New chart
                 </button>
             </header>
 
             {/* Filters */}
             <div className="glass-panel p-4 flex flex-wrap items-center gap-4">
-                <div className="flex flex-col gap-1">
-                    <label className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Season</label>
-                    <select
-                        value={filters.season}
-                        onChange={(e) => setFilters(prev => ({ ...prev, season: e.target.value }))}
-                        className="input-dark bg-[#0a0a0c] min-w-[100px]"
-                    >
-                        {SEASONS.map(s => (
-                            <option key={s.value} value={s.value}>{s.label}</option>
-                        ))}
-                    </select>
-                </div>
-                <GamesWindowSelect value={aggregation} onChange={setAggregation} />
+                <LockedControl reason="Browse past seasons">
+                    <div className="flex flex-col gap-1">
+                        <label className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Season</label>
+                        <select
+                            value={view.season}
+                            onChange={(e) => setFilters(prev => ({ ...prev, season: e.target.value }))}
+                            className="input-dark bg-[#0a0a0c] min-w-[100px]"
+                        >
+                            {SEASONS.map(s => (
+                                <option key={s.value} value={s.value}>{s.label}</option>
+                            ))}
+                        </select>
+                    </div>
+                </LockedControl>
+                <LockedControl reason="Chart recent form">
+                    <GamesWindowSelect value={games} onChange={setAggregation} />
+                </LockedControl>
 
-                <div className="flex flex-col gap-1">
-                    <label className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Position</label>
-                    <select
-                        value={filters.position}
-                        onChange={(e) => setFilters(prev => ({ ...prev, position: e.target.value }))}
-                        className="input-dark bg-[#0a0a0c] min-w-[110px]"
-                    >
-                        {options.positions.map(p => <option key={p} value={p}>{p}</option>)}
-                    </select>
-                </div>
-                <CrRangeSlider
-                    min={filters.min_cr}
-                    max={filters.max_cr}
-                    limitMin={options.min_cr_limit}
-                    limitMax={options.max_cr_limit}
-                    onChange={({ min, max }) => setFilters(prev => ({ ...prev, min_cr: min, max_cr: max }))}
-                />
+                <LockedControl reason="Filter by position">
+                    <div className="flex flex-col gap-1">
+                        <label className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Position</label>
+                        <select
+                            value={view.position}
+                            onChange={(e) => setFilters(prev => ({ ...prev, position: e.target.value }))}
+                            className="input-dark bg-[#0a0a0c] min-w-[110px]"
+                        >
+                            {options.positions.map(p => <option key={p} value={p}>{p}</option>)}
+                        </select>
+                    </div>
+                </LockedControl>
+                <LockedControl reason="Filter by price">
+                    <CrRangeSlider
+                        min={view.min_cr}
+                        max={view.max_cr}
+                        limitMin={options.min_cr_limit}
+                        limitMax={options.max_cr_limit}
+                        onChange={({ min, max }) => setFilters(prev => ({ ...prev, min_cr: min, max_cr: max }))}
+                    />
+                </LockedControl>
                 <span className="text-xs text-gray-500">{rows.length} players</span>
             </div>
 
@@ -293,7 +316,7 @@ export default function CourtVisionView() {
 
             {/* Charts */}
             <div className={`space-y-4 transition-opacity ${loading ? 'opacity-60' : ''}`}>
-                {charts.map(chart => {
+                {shownCharts.map((chart, index) => {
                     const x = colById(chart.x);
                     const y = colById(chart.y);
                     // A `kind` chart supplies its own axes; only column-driven charts
@@ -306,6 +329,30 @@ export default function CourtVisionView() {
                             : null);
                     const isDropTarget = dropId === chart.id && dragId !== chart.id;
 
+                    // Signed out, the first chart is the free sample; the rest show
+                    // what they are and nothing more.
+                    if (locked && index > 0) {
+                        const name = chart.title.split(' — ')[0];
+                        return (
+                            <button
+                                key={chart.id}
+                                type="button"
+                                onClick={() => unlock(`See the ${name} chart`)}
+                                className="glass-panel w-full p-4 flex items-center justify-between gap-3 text-left
+                                           hover:bg-[#ffffff06] transition-colors"
+                            >
+                                <span className="flex items-start gap-2 min-w-0">
+                                    <Lock size={15} className="text-purple-300 mt-0.5 shrink-0" />
+                                    <span className="min-w-0">
+                                        <span className="block font-semibold text-gray-100 truncate">{chart.title}</span>
+                                        {subtitle && <span className="block text-xs text-gray-500">{subtitle}</span>}
+                                    </span>
+                                </span>
+                                <span className="shrink-0 text-xs font-medium text-purple-300">Sign in free</span>
+                            </button>
+                        );
+                    }
+
                     return (
                         <div
                             key={chart.id}
@@ -316,7 +363,7 @@ export default function CourtVisionView() {
                                 isDropTarget ? 'ring-2 ring-purple-500/60' : ''}`}
                         >
                             <div
-                                draggable
+                                draggable={!locked}
                                 onDragStart={() => setDragId(chart.id)}
                                 onDragEnd={() => { setDragId(null); setDropId(null); }}
                                 className="flex items-start justify-between gap-3 cursor-grab active:cursor-grabbing"
@@ -324,7 +371,7 @@ export default function CourtVisionView() {
                                 <div className="flex items-start gap-2 min-w-0">
                                     <GripVertical size={16} className="text-gray-600 mt-0.5 shrink-0" />
                                     <button
-                                        onClick={() => toggleCollapse(chart.id)}
+                                        onClick={() => !locked && toggleCollapse(chart.id)}
                                         className="flex items-start gap-2 text-left min-w-0"
                                     >
                                         {chart.collapsed
@@ -360,7 +407,7 @@ export default function CourtVisionView() {
                                         season={filters.season}
                                         games={aggregation}
                                         onSelectPlayer={openChartPlayer}
-                                        showLayers
+                                        showLayers={!locked}
                                         sizeOptions={sizeOptions}
                                         onChange={updateChart}
                                     />

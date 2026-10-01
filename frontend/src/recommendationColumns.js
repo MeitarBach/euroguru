@@ -1,3 +1,4 @@
+import { prefChanged } from './lib/prefs';
 import { COLUMNS } from './columns';
 
 /**
@@ -94,4 +95,32 @@ export const storeRecColumns = (ids) => {
     } catch {
         /* not fatal - the choice just will not survive a reload */
     }
+    prefChanged();
+};
+
+const WEIGHTS_KEY = 'euroguru.recommendationWeights';
+const WEIGHT_FIELDS = ['alpha', 'weight_efficiency', 'weight_mean_pir', 'weight_consistency'];
+
+/** The ranking weights last chosen, as a partial filters object; {} when none. */
+export const loadRecWeights = () => {
+    try {
+        const saved = JSON.parse(window.localStorage.getItem(WEIGHTS_KEY) || '{}');
+        return Object.fromEntries(
+            WEIGHT_FIELDS.filter(f => typeof saved?.[f] === 'number').map(f => [f, saved[f]])
+        );
+    } catch {
+        return {};
+    }
+};
+
+/** Saves only when something changed, so a mount does not trigger an account write. */
+export const storeRecWeights = (weights) => {
+    const next = Object.fromEntries(WEIGHT_FIELDS.map(f => [f, weights[f]]));
+    if (JSON.stringify(next) === JSON.stringify(loadRecWeights())) return;
+    try {
+        window.localStorage.setItem(WEIGHTS_KEY, JSON.stringify(next));
+    } catch {
+        /* not fatal - the weights just will not survive a reload */
+    }
+    prefChanged();
 };

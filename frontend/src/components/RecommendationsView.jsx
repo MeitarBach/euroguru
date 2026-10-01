@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { fetchFilters, fetchRecommendations } from '../services/api';
-import { TrendingUp, Sliders, Award, Target } from 'lucide-react';
+import { TrendingUp, Sliders, Award, Target, Lock } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import useDebouncedValue from '../hooks/useDebouncedValue';
 import { useOpenPlayer } from '../hooks/playerDetailContext';
@@ -13,10 +13,29 @@ import InfoTip from './InfoTip';
 import { shortName, columnKey, columnLabel, columnInfo, formatCell } from '../columns';
 import {
     REC_COLUMNS, REC_COLUMN_CATEGORIES, REC_DEFAULT_IDS,
-    loadRecColumns, storeRecColumns,
+    loadRecColumns, storeRecColumns, loadRecWeights, storeRecWeights,
 } from '../recommendationColumns';
+import usePrefsSynced from '../hooks/usePrefsSynced';
 import { useIsNarrow } from '../hooks/useMediaQuery';
 import GamesWindowSelect from './GamesWindowSelect';
+import { useGate } from '../hooks/authContext';
+import { GateFade, LockedControl } from './Gate';
+import { PREVIEW_ROWS, BLURRED_ROWS, BLURRED_ROW } from '../lib/gate';
+
+// The ranking a signed-out visitor sees, and where a signed-in one starts. CR bounds
+// are placeholders until /api/filters supplies the season's real ones.
+const DEFAULT_FILTERS = {
+    season: CURRENT_SEASON,
+    min_cr: 0,
+    max_cr: 35,
+    position: 'All',
+    last_x_games: 5,
+    alpha: 0.85,
+    weight_efficiency: 2.0,
+    weight_mean_pir: 1.0,
+    weight_consistency: 1.0
+};
+const BY_SCORE = { key: 'RecScore', direction: 'desc' };
 
 const SortIcon = ({ column, sortConfig }) => {
     if (sortConfig.key !== column) return <div className="w-4 h-4 inline-block ml-1 opacity-20">↕</div>;
@@ -74,17 +93,9 @@ const SliderControl = ({ label, value, onChange, min, max, step, description }) 
 );
 
 export default function RecommendationsView() {
-    const [filters, setFilters] = useState({
-        season: CURRENT_SEASON,
-        min_cr: 0,
-        max_cr: 35,
-        position: 'All',
-        last_x_games: 5,
-        alpha: 0.85,
-        weight_efficiency: 2.0,
-        weight_mean_pir: 1.0,
-        weight_consistency: 1.0
-    });
+    // Weights are the one part of the ranking worth remembering: they encode how
+    // someone likes to pick. Season, window and price range are per-visit questions.
+    const [filters, setFilters] = useState(() => ({ ...DEFAULT_FILTERS, ...loadRecWeights() }));
 
     const [options, setOptions] = useState({
         positions: ['All'],
@@ -92,9 +103,17 @@ export default function RecommendationsView() {
         max_cr_limit: 35
     });
 
+    // Signed out, the ranking is the default one over this season and the visitor
+    // sees its top three. Derived rather than written over the real state, so a
+    // signed-in user's weights survive a sign-out and back in.
+    const { locked, unlock } = useGate();
+    const view = locked
+        ? { ...DEFAULT_FILTERS, min_cr: options.min_cr_limit, max_cr: options.max_cr_limit }
+        : filters;
+
     // Windowed to the same games selector the ranking uses, so the sparkline in a
     // row covers the stretch its numbers were computed over.
-    const { trendFor } = usePriceTrend(filters.season, filters.last_x_games);
+    const { trendFor } = usePriceTrend(view.season, view.last_x_games);
     const openPlayer = useOpenPlayer();
     // Abbreviates the given name on a phone; see StatsView.
     const narrow = useIsNarrow();
@@ -102,9 +121,14 @@ export default function RecommendationsView() {
     // The endpoint returns the same per-player aggregates the stats table uses, so
     // this tab can offer them too rather than only the four ranking figures.
     const [selectedColumns, setSelectedColumns] = useState(loadRecColumns);
+    usePrefsSynced(() => {
+        setSelectedColumns(loadRecColumns());
+        setFilters(prev => ({ ...prev, ...loadRecWeights() }));
+    });
+    const shownColumnIds = locked ? REC_DEFAULT_IDS : selectedColumns;
     const visibleColumns = useMemo(
-        () => REC_COLUMNS.filter(c => selectedColumns.includes(c.id)),
-        [selectedColumns],
+        () => REC_COLUMNS.filter(c => shownColumnIds.includes(c.id)),
+        [shownColumnIds],
     );
     const chooseColumns = (ids) => {
         setSelectedColumns(ids);
@@ -118,8 +142,10 @@ export default function RecommendationsView() {
 
     const [recommendations, setRecommendations] = useState([]);
     const [loading, setLoading] = useState(false);
-    const [sortConfig, setSortConfig] = useState({ key: 'RecScore', direction: 'desc' });
+    const [sortConfig, setSortConfig] = useState(BY_SCORE);
     const [showAdvanced, setShowAdvanced] = useState(false);
+
+    const sort = locked ? BY_SCORE : sortConfig;
 
     // Every one of the six sliders fires per drag step; fetches follow the settled
     // values while the controls stay responsive.
@@ -136,8 +162,8 @@ export default function RecommendationsView() {
     // Load initial filters options
     useEffect(() => {
         setFiltersReady(false);
-        loadFilters(filters.season);
-    }, [filters.season]);
+        loadFilters(view.season);
+    }, [view.season]);
 
     const loadFilters = async (season) => {
         const data = await fetchFilters(season);
@@ -175,24 +201,49 @@ export default function RecommendationsView() {
         && wMean === filters.weight_mean_pir
         && wCons === filters.weight_consistency;
 
+    // Saved once a drag settles, not per step. Never while locked: those are the
+    // defaults on show, not a choice anyone made.
+    useEffect(() => {
+        if (locked || !settled) return;
+        const weights = {
+            alpha, weight_efficiency: wEff, weight_mean_pir: wMean, weight_consistency: wCons,
+        };
+        // Untouched defaults on a first visit are not a choice either, and saving them
+        // would overwrite weights this account set on another device.
+        const untouched = Object.keys(weights).every(k => weights[k] === DEFAULT_FILTERS[k]);
+        if (untouched && !Object.keys(loadRecWeights()).length) return;
+        storeRecWeights(weights);
+    }, [locked, settled, alpha, wEff, wMean, wCons]);
+
     useEffect(() => {
         if (!filtersReady || !settled) return;
         loadRecommendations();
-    }, [filtersReady, settled, filters.season, filters.position, filters.last_x_games, minCr, maxCr, alpha, wEff, wMean, wCons]);
+    }, [filtersReady, settled, locked, view.season, view.position, view.last_x_games, minCr, maxCr, alpha, wEff, wMean, wCons]);
 
     const loadRecommendations = async () => {
         const seq = ++requestSeq.current;
         setLoading(true);
         const data = await fetchRecommendations({
-            season: filters.season,
-            position: filters.position,
-            last_x_games: filters.last_x_games,
-            min_cr: minCr,
-            max_cr: maxCr,
-            alpha,
-            weight_efficiency: wEff,
-            weight_mean_pir: wMean,
-            weight_consistency: wCons
+            season: view.season,
+            position: view.position,
+            last_x_games: view.last_x_games,
+            ...(locked
+                ? {
+                    min_cr: view.min_cr,
+                    max_cr: view.max_cr,
+                    alpha: view.alpha,
+                    weight_efficiency: view.weight_efficiency,
+                    weight_mean_pir: view.weight_mean_pir,
+                    weight_consistency: view.weight_consistency,
+                }
+                : {
+                    min_cr: minCr,
+                    max_cr: maxCr,
+                    alpha,
+                    weight_efficiency: wEff,
+                    weight_mean_pir: wMean,
+                    weight_consistency: wCons,
+                }),
         });
         if (seq !== requestSeq.current) return; // a newer request has taken over
         setRecommendations(data || []);
@@ -218,10 +269,10 @@ export default function RecommendationsView() {
 
     const sortedRecommendations = useMemo(() => {
         let sortableItems = [...recommendations];
-        if (sortConfig.key !== null) {
+        if (sort.key !== null) {
             sortableItems.sort((a, b) => {
-                let aValue = a[sortConfig.key];
-                let bValue = b[sortConfig.key];
+                let aValue = a[sort.key];
+                let bValue = b[sort.key];
 
                 if (typeof aValue === 'string' && !isNaN(aValue)) aValue = parseFloat(aValue);
                 if (typeof bValue === 'string' && !isNaN(bValue)) bValue = parseFloat(bValue);
@@ -230,16 +281,21 @@ export default function RecommendationsView() {
                 if (bValue === null || bValue === undefined) return -1;
 
                 if (aValue < bValue) {
-                    return sortConfig.direction === 'asc' ? -1 : 1;
+                    return sort.direction === 'asc' ? -1 : 1;
                 }
                 if (aValue > bValue) {
-                    return sortConfig.direction === 'asc' ? 1 : -1;
+                    return sort.direction === 'asc' ? 1 : -1;
                 }
                 return 0;
             });
         }
         return sortableItems;
-    }, [recommendations, sortConfig]);
+    }, [recommendations, sort]);
+
+    // The top picks in full, then a few blurred so the wall sits on real data.
+    const shownRecommendations = locked
+        ? sortedRecommendations.slice(0, PREVIEW_ROWS.recs + BLURRED_ROWS)
+        : sortedRecommendations;
 
     return (
         <div className="space-y-6">
@@ -254,13 +310,13 @@ export default function RecommendationsView() {
                     <p className="text-gray-400 text-sm">AI-powered player suggestions based on efficiency and consistency.</p>
                 </div>
                 <button
-                    onClick={() => setShowAdvanced(!showAdvanced)}
-                    className={`flex items-center gap-2 shrink-0 px-4 py-2 rounded-lg text-sm font-medium transition-all ${showAdvanced
+                    onClick={locked ? () => unlock('Tune the ranking weights') : () => setShowAdvanced(!showAdvanced)}
+                    className={`flex items-center gap-2 shrink-0 px-4 py-2 rounded-lg text-sm font-medium transition-all ${showAdvanced && !locked
                         ? 'bg-purple-600 text-white shadow-lg shadow-purple-900/20'
                         : 'text-gray-400 hover:text-white hover:bg-[#ffffff05] border border-[#ffffff10]'
                         }`}
                 >
-                    <Sliders size={16} />
+                    {locked ? <Lock size={14} className="text-purple-300" /> : <Sliders size={16} />}
                     Advanced Settings
                 </button>
             </header>
@@ -268,68 +324,78 @@ export default function RecommendationsView() {
             {/* Basic Filters */}
             <div className="glass-panel p-4 space-y-4">
                 <div className="flex flex-wrap items-center gap-4">
-                    <div className="flex flex-col gap-1">
-                        <label className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Season</label>
-                        <select
-                            value={filters.season}
-                            onChange={(e) => setFilters(prev => ({ ...prev, season: e.target.value }))}
-                            className="input-dark bg-[#0a0a0c] min-w-[100px]"
-                        >
-                            {SEASONS.map(s => (
-                                <option key={s.value} value={s.value}>{s.label}</option>
-                            ))}
-                        </select>
-                    </div>
+                    <LockedControl reason="Browse past seasons">
+                        <div className="flex flex-col gap-1">
+                            <label className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Season</label>
+                            <select
+                                value={view.season}
+                                onChange={(e) => setFilters(prev => ({ ...prev, season: e.target.value }))}
+                                className="input-dark bg-[#0a0a0c] min-w-[100px]"
+                            >
+                                {SEASONS.map(s => (
+                                    <option key={s.value} value={s.value}>{s.label}</option>
+                                ))}
+                            </select>
+                        </div>
+                    </LockedControl>
 
-                    <GamesWindowSelect
-                        value={filters.last_x_games}
-                        onChange={(v) => setFilters(prev => ({ ...prev, last_x_games: v }))}
-                    />
-
-                    <div className="flex flex-col gap-1">
-                        <label className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Position</label>
-                        <select
-                            value={filters.position}
-                            onChange={(e) => setFilters(prev => ({ ...prev, position: e.target.value }))}
-                            className="input-dark bg-[#0a0a0c] min-w-[120px]"
-                        >
-                            {options.positions.map(p => (
-                                <option key={p} value={p}>{p}</option>
-                            ))}
-                        </select>
-                    </div>
-
-                    <div className="flex flex-col gap-1">
-                        <label className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Columns</label>
-                        {/* `available` is every column: unlike the stats table, these rows
-                            all come from one endpoint that either returns a field for
-                            everyone or for no one, so there is nothing to grey out. */}
-                        <ColumnPicker
-                            columns={REC_COLUMNS}
-                            categories={REC_COLUMN_CATEGORIES}
-                            selected={selectedColumns}
-                            available={ALL_AVAILABLE}
-                            onChange={chooseColumns}
-                            onReset={() => chooseColumns(REC_DEFAULT_IDS)}
-                            defaultIds={REC_DEFAULT_IDS}
+                    <LockedControl reason="Rank on recent form">
+                        <GamesWindowSelect
+                            value={view.last_x_games}
+                            onChange={(v) => setFilters(prev => ({ ...prev, last_x_games: v }))}
                         />
-                    </div>
+                    </LockedControl>
+
+                    <LockedControl reason="Picks by position">
+                        <div className="flex flex-col gap-1">
+                            <label className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Position</label>
+                            <select
+                                value={view.position}
+                                onChange={(e) => setFilters(prev => ({ ...prev, position: e.target.value }))}
+                                className="input-dark bg-[#0a0a0c] min-w-[120px]"
+                            >
+                                {options.positions.map(p => (
+                                    <option key={p} value={p}>{p}</option>
+                                ))}
+                            </select>
+                        </div>
+                    </LockedControl>
+
+                    <LockedControl reason="Choose your own columns">
+                        <div className="flex flex-col gap-1">
+                            <label className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Columns</label>
+                            {/* `available` is every column: unlike the stats table, these rows
+                                all come from one endpoint that either returns a field for
+                                everyone or for no one, so there is nothing to grey out. */}
+                            <ColumnPicker
+                                columns={REC_COLUMNS}
+                                categories={REC_COLUMN_CATEGORIES}
+                                selected={shownColumnIds}
+                                available={ALL_AVAILABLE}
+                                onChange={chooseColumns}
+                                onReset={() => chooseColumns(REC_DEFAULT_IDS)}
+                                defaultIds={REC_DEFAULT_IDS}
+                            />
+                        </div>
+                    </LockedControl>
 
                     {/* Was two independent sliders side by side, which let the minimum be
                         dragged above the maximum and return nothing. One control, two
                         thumbs, each clamped by the other. */}
-                    <CrRangeSlider
-                        min={filters.min_cr}
-                        max={filters.max_cr}
-                        limitMin={options.min_cr_limit}
-                        limitMax={options.max_cr_limit}
-                        onChange={({ min, max }) => setFilters(prev => ({ ...prev, min_cr: min, max_cr: max }))}
-                    />
+                    <LockedControl reason="Picks within your budget">
+                        <CrRangeSlider
+                            min={view.min_cr}
+                            max={view.max_cr}
+                            limitMin={options.min_cr_limit}
+                            limitMax={options.max_cr_limit}
+                            onChange={({ min, max }) => setFilters(prev => ({ ...prev, min_cr: min, max_cr: max }))}
+                        />
+                    </LockedControl>
                 </div>
 
                 {/* Advanced Settings */}
                 <AnimatePresence>
-                    {showAdvanced && (
+                    {showAdvanced && !locked && (
                         <motion.div
                             initial={{ opacity: 0, height: 0 }}
                             animate={{ opacity: 1, height: 'auto' }}
@@ -409,8 +475,8 @@ export default function RecommendationsView() {
                                             sortKey={columnKey(col, true)}
                                             align={col.align}
                                             info={columnInfo(col, scoreMetric)}
-                                            sortConfig={sortConfig}
-                                            onSort={requestSort}
+                                            sortConfig={sort}
+                                            onSort={locked ? () => unlock('Sort by any stat') : requestSort}
                                             sticky={col.fmt === 'player'}
                                             // The price trend cell is a chart; the figure
                                             // behind it is the CR column, so sort there.
@@ -420,15 +486,17 @@ export default function RecommendationsView() {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-[#ffffff08]">
-                                    {sortedRecommendations.map((player, idx) => {
+                                    {shownRecommendations.map((player, idx) => {
                                         const rank = rankByPlayer.get(player.PlayerName) ?? idx;
                                         const isTopPick = rank < 3;
+                                        const hidden = locked && idx >= PREVIEW_ROWS.recs;
                                         return (
                                             <tr
                                                 key={player.PlayerName ?? idx}
-                                                onClick={() => openPlayer(player.PlayerName, filters.season)}
+                                                onClick={() => openPlayer(player.PlayerName, view.season)}
+                                                aria-hidden={hidden ? true : undefined}
                                                 className={`group hover:bg-[#ffffff03] transition-colors cursor-pointer ${isTopPick ? 'bg-gradient-to-r from-purple-500/5 to-transparent' : ''
-                                                    }`}
+                                                    } ${hidden ? BLURRED_ROW : ''}`}
                                             >
                                                 <td className="hidden md:table-cell px-6 py-3">
                                                     <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${isTopPick
@@ -496,8 +564,12 @@ export default function RecommendationsView() {
                         </table>
                     </div>
 
+                    {locked && sortedRecommendations.length > PREVIEW_ROWS.recs && (
+                        <GateFade title={`See all ${sortedRecommendations.length} picks`} />
+                    )}
+
                     {/* Info Footer */}
-                    {sortedRecommendations.length > 0 && (
+                    {!locked && sortedRecommendations.length > 0 && (
                         <div className="px-6 py-4 bg-[#ffffff03] border-t border-[#ffffff08] flex items-center gap-2 text-xs text-gray-500">
                             <Target size={14} className="text-purple-400" />
                             Showing top {sortedRecommendations.length} recommendations based on your criteria

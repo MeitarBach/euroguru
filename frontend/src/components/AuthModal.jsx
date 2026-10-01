@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { X } from 'lucide-react';
+import { X, Check } from 'lucide-react';
 import { useAuth } from '../hooks/authContext';
+import { accountBenefits, SAVED_SETTINGS_LIVE } from '../lib/gate';
 
 /** The Google wordmark's G. Inlined because lucide carries no brand icons. */
 function GoogleMark() {
@@ -25,10 +26,12 @@ const FIELD = 'w-full px-3 py-2.5 rounded-lg bg-[#00000040] border border-[#ffff
  * whether it is open. The shell is PlayerDetailView's, which is already mobile-right:
  * a full-bleed sheet below sm, a centred card above it.
  */
-export default function AuthModal({ onClose }) {
+export default function AuthModal({ reason, onClose }) {
     const { signIn, signUp, signInWithGoogle } = useAuth();
 
-    const [mode, setMode] = useState('signin');
+    // A gate is usually hit by someone who has never signed up, so it opens on the
+    // form they need; the sidebar button is usually a returning user.
+    const [mode, setMode] = useState(reason ? 'signup' : 'signin');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [busy, setBusy] = useState(false);
@@ -102,13 +105,25 @@ export default function AuthModal({ onClose }) {
                 <div className="flex items-start justify-between">
                     <div>
                         <h2 className="text-xl font-bold text-white">
-                            {isSignUp ? 'Create your account' : 'Welcome back'}
+                            {reason ?? (isSignUp ? 'Create your account' : 'Welcome back')}
                         </h2>
-                        <p className="text-sm text-gray-400 mt-0.5">
-                            {isSignUp
-                                ? 'Save your picks and settings across devices.'
-                                : 'Sign in to pick up where you left off.'}
-                        </p>
+                        {reason ? (
+                            <ul className="mt-2 space-y-1 text-sm text-gray-400">
+                                {accountBenefits().map(b => (
+                                    <li key={b} className="flex items-center gap-1.5">
+                                        <Check size={14} className="text-emerald-400 shrink-0" /> {b}
+                                    </li>
+                                ))}
+                            </ul>
+                        ) : (
+                            <p className="text-sm text-gray-400 mt-0.5">
+                                {isSignUp
+                                    ? (SAVED_SETTINGS_LIVE
+                                        ? 'Save your picks and settings across devices.'
+                                        : 'Free, and unlocks the full stats, charts and picks.')
+                                    : 'Sign in to pick up where you left off.'}
+                            </p>
+                        )}
                     </div>
                     <button
                         onClick={onClose}

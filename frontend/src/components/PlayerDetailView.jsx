@@ -4,6 +4,9 @@ import { X } from 'lucide-react';
 import InfoTip from './InfoTip';
 import usePriceTrend from '../hooks/usePriceTrend';
 import PriceHistoryChart from './charts/PriceHistoryChart';
+import { useGate } from '../hooks/authContext';
+import { GateFade } from './Gate';
+import { PREVIEW_ROWS, BLURRED_ROWS, BLURRED_ROW } from '../lib/gate';
 
 const fmt = (value, digits = 1, suffix = '') => {
     // ?? not ||: a plus-minus of 0 or a scoreless game is data, not a missing value.
@@ -34,6 +37,7 @@ export default function PlayerDetailView({ name, season, onClose }) {
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
     const { trendFor } = usePriceTrend(season);
+    const { locked } = useGate();
 
     useEffect(() => {
         let active = true;
@@ -61,6 +65,10 @@ export default function PlayerDetailView({ name, season, onClose }) {
     // rows come from a different feed and can name someone absent from the stats, so
     // say so instead of rendering a grid of dashes.
     const missing = !loading && !summary.PlayerName && games.length === 0;
+
+    // The log is newest first, so signed out this is the last few games in full and
+    // a blurred handful beneath them.
+    const shownGames = locked ? games.slice(0, PREVIEW_ROWS.gameLog + BLURRED_ROWS) : games;
 
     const trend = trendFor({ PlayerKey: summary.PlayerKey, PlayerName: summary.PlayerName ?? name });
 
@@ -150,8 +158,13 @@ export default function PlayerDetailView({ name, season, onClose }) {
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-[#ffffff08]">
-                                        {games.map((g, i) => (
-                                            <tr key={`${g.GameCode}-${i}`} className="hover:bg-[#ffffff03]">
+                                        {shownGames.map((g, i) => (
+                                            <tr
+                                                key={`${g.GameCode}-${i}`}
+                                                aria-hidden={locked && i >= PREVIEW_ROWS.gameLog ? true : undefined}
+                                                className={`hover:bg-[#ffffff03] ${
+                                                    locked && i >= PREVIEW_ROWS.gameLog ? BLURRED_ROW : ''}`}
+                                            >
                                                 {/* The header has always said "Round" but this rendered
                                                     GameCode, which for archive seasons is a Euroleague
                                                     game id in the 1-406 range. The schedule supplies the
@@ -190,6 +203,9 @@ export default function PlayerDetailView({ name, season, onClose }) {
                                     </tbody>
                                 </table>
                             </div>
+                            {locked && games.length > PREVIEW_ROWS.gameLog && (
+                                <GateFade title={`See all ${games.length} games`} />
+                            )}
                         </div>
                     </>
                 )}

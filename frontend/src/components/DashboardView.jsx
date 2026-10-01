@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { fetchDashboardData } from '../services/api';
-import { Activity, ChevronDown, ChevronUp, Flame, Target, Banknote } from 'lucide-react';
+import { Activity, ChevronDown, ChevronUp, Flame, Target, Banknote, Sparkles, X } from 'lucide-react';
 import { statusOf, statusRank } from '../injuries';
 import { useOpenPlayer } from '../hooks/playerDetailContext';
 import usePriceTrend from '../hooks/usePriceTrend';
 import PriceTrend from './charts/PriceTrend';
 import SeasonNotStarted from './SeasonNotStarted';
 import InfoTip from './InfoTip';
+import { useGate } from '../hooks/authContext';
+import { loadStored, storeValue } from '../columns';
 // The dashboard reports on the current season and falls back only when the user asks
 // it to. Shared with the other tabs so the price history, the detail view and the
 // widgets cannot drift apart - this page pointing at the current season while Stats,
@@ -101,6 +103,49 @@ const WidgetColumn = ({ title, subtitle, info, icon: Icon, players, type, color,
         </div>
     </div>
 );
+
+const BANNER_DISMISSED_KEY = 'euroguru.signupBanner.dismissed';
+
+/**
+ * The one place the dashboard asks for an account.
+ *
+ * Everything on this page is free, so this is an invitation rather than a wall, and it
+ * stays dismissed once closed - the locks on the other tabs keep making the case.
+ */
+const SignUpBanner = () => {
+    const { locked, unlock } = useGate();
+    const [dismissed, setDismissed] = useState(() => loadStored(BANNER_DISMISSED_KEY, false));
+    if (!locked || dismissed) return null;
+
+    const dismiss = () => {
+        setDismissed(true);
+        storeValue(BANNER_DISMISSED_KEY, true);
+    };
+
+    return (
+        <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-[#8b5cf610] border border-[#8b5cf630] text-sm">
+            <Sparkles size={16} className="text-purple-300 shrink-0" />
+            <span className="text-gray-300 flex-1 min-w-0">
+                Create a free account to unlock EuroGuru's full functionality.
+            </span>
+            <button
+                type="button"
+                onClick={() => unlock('Unlock the full EuroGuru')}
+                className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium text-white bg-purple-600 hover:bg-purple-500 transition-colors"
+            >
+                Sign in free
+            </button>
+            <button
+                type="button"
+                onClick={dismiss}
+                aria-label="Dismiss"
+                className="shrink-0 p-1.5 -m-1 rounded-lg text-gray-500 hover:text-white hover:bg-[#ffffff08] transition-colors"
+            >
+                <X size={14} />
+            </button>
+        </div>
+    );
+};
 
 // How many rows the panel shows before "Show all". Enough to be useful at a glance
 // without the list pushing the widgets above it off the screen.
@@ -274,6 +319,8 @@ export default function DashboardView() {
                     Smart insights and critical updates · {SEASON_LABEL[season] ?? season}
                 </p>
             </header>
+
+            <SignUpBanner />
 
             {!started && (
                 <SeasonNotStarted
