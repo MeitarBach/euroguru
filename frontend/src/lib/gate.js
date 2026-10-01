@@ -12,6 +12,9 @@ export const PREVIEW_ROWS = {
     gameLog: 3,
 };
 
+// Players a signed-out visitor can follow on the Live tab at once.
+export const FREE_WATCH_LIMIT = 3;
+
 // Blurred rows rendered under the preview. Enough to show that real data continues
 // past the wall, without laying out hundreds of rows nobody can read.
 export const BLURRED_ROWS = 6;

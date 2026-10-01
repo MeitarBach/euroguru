@@ -2,18 +2,21 @@ import React from 'react';
 import { Lock } from 'lucide-react';
 import { NAV_ITEMS } from '../navigation';
 import { useGate } from '../hooks/authContext';
+import useGameOn from '../hooks/useGameOn';
+import LiveDot from './live/LiveDot';
 
 /**
  * Bottom tab bar, below md only.
  *
  * The desktop sidebar is 260px of a phone's ~390px, so it hides and this takes over.
- * A bottom bar rather than a hamburger because there are exactly four destinations and
+ * A bottom bar rather than a hamburger because there are only five destinations and
  * they stay one tap away, at the reachable end of the screen.
  *
  * Opaque for the same reason the sidebar is: content scrolls underneath it.
  */
 export default function MobileNav({ activeTab, setActiveTab }) {
     const { locked } = useGate();
+    const gameOn = useGameOn();
     return (
         <nav
             className="md:hidden fixed bottom-0 inset-x-0 z-40 flex border-t border-[#ffffff10]
@@ -37,11 +40,21 @@ export default function MobileNav({ activeTab, setActiveTab }) {
                     >
                         <span className="relative">
                             <Icon size={20} />
+                            {item.id === 'live' && gameOn && (
+                                <span className="absolute -top-0.5 -right-1.5"><LiveDot /></span>
+                            )}
                             {locked && item.gated && (
                                 <Lock size={9} className="absolute -top-1 -right-2 text-gray-500" aria-label="Preview until you sign in" />
                             )}
                         </span>
-                        <span className="text-[10px] font-medium leading-none">{item.short}</span>
+                        <span className="flex items-center gap-1 text-[10px] font-medium leading-none">
+                            {item.short}
+                            {item.badge && (
+                                <span className="px-1 py-px rounded-sm text-[7px] font-bold uppercase tracking-wide bg-purple-500/25 text-purple-200">
+                                    {item.badge}
+                                </span>
+                            )}
+                        </span>
                     </button>
                 );
             })}
