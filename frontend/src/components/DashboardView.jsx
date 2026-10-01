@@ -6,6 +6,7 @@ import { useOpenPlayer } from '../hooks/playerDetailContext';
 import usePriceTrend from '../hooks/usePriceTrend';
 import PriceTrend from './charts/PriceTrend';
 import SeasonNotStarted from './SeasonNotStarted';
+import InfoTip from './InfoTip';
 // The dashboard reports on the current season and falls back only when the user asks
 // it to. Shared with the other tabs so the price history, the detail view and the
 // widgets cannot drift apart - this page pointing at the current season while Stats,
@@ -17,6 +18,8 @@ import { CURRENT_SEASON, PREVIOUS_SEASON, SEASON_LABEL } from '../seasons';
 // Mirrors ELITE_SCORE_THRESHOLD in main.py, for the Consistent Elite subtitle. Only
 // ever a label - the filtering itself happens server-side.
 const ELITE_MIN = 15;
+
+const SCORE_COLOR = { hot: 'text-orange-400', consistency: 'text-purple-400', budget: 'text-green-400' };
 
 // Rendered as plain elements rather than animated ones. A staggered entrance that
 // starts at opacity 0 leaves the widgets blank whenever the animation frames do not
@@ -47,51 +50,38 @@ const PlayerCard = ({ player, rank, type, metric = 'PIR', trend, onOpen }) => (
             <PriceTrend trend={trend} width={56} className="mt-1" />
         </div>
 
-        {/* Right side stats based on widget type */}
+        {/* Same layout on every widget: the headline average in the widget's colour,
+            then SD and CR, so cards can be compared across columns at a glance. */}
         <div className="text-right flex flex-col items-end">
-            {type === 'consistency' && (
-                <>
-                    <div className="flex items-center gap-2">
-                        <span className="font-mono font-bold text-purple-400">{player.Average_Score?.toFixed(1)}</span>
-                        <span className="text-[10px] text-gray-500">{metric}</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-xs">
-                        <span className="text-blue-400">
-                            {player.StdDev_Score === null || player.StdDev_Score === undefined
-                                ? '—'
-                                : player.StdDev_Score.toFixed(1)}
-                        </span>
-                        <span className="text-[10px] text-gray-500">SD</span>
-                        <span className="text-gray-300 ml-1">{player.CR} CR</span>
-                    </div>
-                </>
-            )}
-
-            {type === 'budget' && (
-                <>
-                    <div className="font-mono font-bold text-green-400">{player.Average_Score?.toFixed(1)}</div>
-                    <div className="text-[10px] text-gray-500">Avg {metric}</div>
-                    <div className="text-xs text-gray-300">{player.CR} CR</div>
-                </>
-            )}
-
-            {type === 'hot' && (
-                <>
-                    <div className="font-mono font-bold text-orange-400">{player.Average_Score?.toFixed(1)}</div>
-                    <div className="text-[10px] text-gray-500">Avg {metric}</div>
-                </>
-            )}
+            <div className="flex items-center gap-2">
+                <span className={`font-mono font-bold ${SCORE_COLOR[type]}`}>{player.Average_Score?.toFixed(1)}</span>
+                <span className="text-[10px] text-gray-500">{metric}</span>
+            </div>
+            <div className="flex items-center gap-2 text-xs">
+                <span className="text-blue-400">
+                    {player.StdDev_Score === null || player.StdDev_Score === undefined
+                        ? '—'
+                        : player.StdDev_Score.toFixed(1)}
+                </span>
+                <span className="text-[10px] text-gray-500">SD</span>
+                <span className="text-gray-300 ml-1">{player.CR} CR</span>
+            </div>
         </div>
     </div>
 );
 
-const WidgetColumn = ({ title, subtitle, icon: Icon, players, type, color, metric, trendFor, onOpen }) => (
+const WidgetColumn = ({ title, subtitle, info, icon: Icon, players, type, color, metric, trendFor, onOpen }) => (
     <div className="glass-panel p-4 flex flex-col gap-4">
         <div>
             <h3 className={`font-bold text-gray-200 flex items-center gap-2`}>
                 <Icon size={18} className={color} /> {title}
             </h3>
-            {subtitle && <p className="text-xs text-gray-500 mt-1 ml-6">{subtitle}</p>}
+            {subtitle && (
+                <p className="text-xs text-gray-500 mt-1 ml-6">
+                    {subtitle}
+                    {info && <InfoTip text={info} className="ml-1.5" />}
+                </p>
+            )}
         </div>
         <div className="space-y-2">
             {players && players.map((p, i) => (
@@ -330,6 +320,7 @@ export default function DashboardView() {
                 <WidgetColumn
                     title="Consistent Elite"
                     subtitle={`Last 5 games (steady, ${ELITE_MIN}+ ${metric})`}
+                    info={`SD (standard deviation) is how much a player's ${metric} swings from game to game. Lower means more predictable. Players already in Who's Hot aren't repeated here.`}
                     icon={Target}
                     color="text-blue-500"
                     players={data.widgets.consistent}
@@ -340,7 +331,7 @@ export default function DashboardView() {
                 />
                 <WidgetColumn
                     title="Budget Picks"
-                    subtitle="Last 5 games (<10 CR)"
+                    subtitle="Last 5 games (≤10 CR, steadier ranks higher)"
                     icon={Banknote}
                     color="text-green-500"
                     players={data.widgets.budget}

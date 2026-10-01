@@ -118,11 +118,18 @@ ELITE_SCORE_THRESHOLD = 15
 # 5.2, which sorting on the deviation alone gets backwards.
 CONSISTENCY_VOLATILITY_WEIGHT = 2.0
 
+# The same penalty for Budget Picks, kept light on purpose: that widget answers "who
+# scores most for the price", so the average must still lead and volatility only
+# breaks near-ties and sinks the wildest swingers. Measured on 2025-26: at 0.5 the
+# top four are unchanged and only an 18.0 scorer swinging by 12.7 drops out; at 1.0
+# the deviation starts reordering the top of the list.
+BUDGET_VOLATILITY_WEIGHT = 0.5
 
-def _reliable_floor(stats):
+
+def _reliable_floor(stats, weight=CONSISTENCY_VOLATILITY_WEIGHT):
     """
-    Average score less CONSISTENCY_VOLATILITY_WEIGHT deviations: what a player can be
-    counted on for, in the same units as the score itself.
+    Average score less `weight` deviations: what a player can be counted on for, in
+    the same units as the score itself.
 
     An unknown deviation counts as zero rather than dropping the player. One round
     into a season nobody has one - a single game has nothing to vary from - and
@@ -130,7 +137,7 @@ def _reliable_floor(stats):
     """
     mean = pd.to_numeric(stats["Average_Score"], errors="coerce")
     deviation = pd.to_numeric(stats["StdDev_Score"], errors="coerce").fillna(0)
-    return mean - CONSISTENCY_VOLATILITY_WEIGHT * deviation
+    return mean - weight * deviation
 
 
 def _widget_records(frame, keep_null=()):
@@ -324,6 +331,8 @@ class RecommendationParams(BaseModel):
     weight_efficiency: float = 2.0
     weight_mean_pir: float = 1.0
     weight_consistency: float = 1.0
+    # Defaulted so a client that predates the selector still gets every position.
+    position: str = "All"
 
 @app.post("/api/recommend")
 def get_recommendations(params: RecommendationParams):
@@ -331,8 +340,10 @@ def get_recommendations(params: RecommendationParams):
     if df.empty:
         return []
 
-    # 1. Filter by CR first (optimization)
-    filtered_df = df[(df['CR'] >= params.min_cr) & (df['CR'] <= params.max_cr)].copy()
+    # 1. Filter by CR and position first. Position narrows the pool before ranking,
+    # so the top 20 are the best at that position rather than whichever of the
+    # overall top 20 happen to play it.
+    filtered_df = filter_by_cr_and_position(df, params.min_cr, params.max_cr, params.position).copy()
 
     recs = recommend_players_v2(
         filtered_df,
@@ -431,13 +442,17 @@ def get_dashboard_data(season: str = DEFAULT_SEASON):
 
     # --- Widget 2: "Consistent Elite 🎯" (Last 5 Games, high scorers, steadiest first) ---
     stats_cons = calculate_pir_stats(df, last_x_games=5)
+    # Anyone already in Who's Hot is left out, so the two widgets recommend ten
+    # different players rather than repeating the same stars. Budget Picks keeps its
+    # own pool: a cheap player who is also hot is still the answer to "who fits my cap".
+    not_hot = stats_cons[~stats_cons['PlayerName'].isin(hot_players['PlayerName'])]
     # Filter for elite scorers first. The threshold is calibrated for PIR; on the
     # fantasy-points scale it means something different, so the fallback below is
     # what actually populates the widget until it is re-tuned on real round data.
-    elite = stats_cons[stats_cons['Average_Score'] > ELITE_SCORE_THRESHOLD]
+    elite = not_hot[not_hot['Average_Score'] > ELITE_SCORE_THRESHOLD]
     if elite.empty:
         # Fallback if no one clears the bar (early season?) -> take top 20 scorers
-        elite = stats_cons.sort_values('Average_Score', ascending=False).head(20)
+        elite = not_hot.sort_values('Average_Score', ascending=False).head(20)
 
     # Ranked on the floor rather than the deviation alone, so output still separates
     # players who swing by similar amounts. Sorting on StdDev by itself also had no
@@ -451,15 +466,20 @@ def get_dashboard_data(season: str = DEFAULT_SEASON):
         .drop(columns="_floor")
     )
 
-    # --- Widget 3: "Budget Picks 💰" (Last 5 Games, CR < 10, Highest Avg Score) ---
+    # --- Widget 3: "Budget Picks 💰" (Last 5 Games, CR <= 10, avg with a light SD penalty) ---
     # Re-use stats_cons (Last 5 games is good baseline)
     budget = stats_cons[stats_cons['CR'] <= 10]
-    budget_players = budget.sort_values('Average_Score', ascending=False).head(5)
+    budget_players = (
+        budget.assign(_floor=_reliable_floor(budget, BUDGET_VOLATILITY_WEIGHT))
+        .sort_values("_floor", ascending=False)
+        .head(5)
+        .drop(columns="_floor")
+    )
 
     widgets = {
-        "hot": _widget_records(hot_players),
+        "hot": _widget_records(hot_players, keep_null=("StdDev_Score",)),
         "consistent": _widget_records(consistent_players, keep_null=("StdDev_Score",)),
-        "budget": _widget_records(budget_players),
+        "budget": _widget_records(budget_players, keep_null=("StdDev_Score",)),
     }
 
     # 4. Injuries (if available)

@@ -78,6 +78,7 @@ export default function RecommendationsView() {
         season: CURRENT_SEASON,
         min_cr: 0,
         max_cr: 35,
+        position: 'All',
         last_x_games: 5,
         alpha: 0.85,
         weight_efficiency: 2.0,
@@ -86,6 +87,7 @@ export default function RecommendationsView() {
     });
 
     const [options, setOptions] = useState({
+        positions: ['All'],
         min_cr_limit: 0,
         max_cr_limit: 35
     });
@@ -141,17 +143,20 @@ export default function RecommendationsView() {
         const data = await fetchFilters(season);
         if (data) {
             setOptions({
+                positions: data.positions || ['All'],
                 min_cr_limit: data.min_cr || 0,
                 max_cr_limit: data.max_cr || 35
             });
             setScoreMetric(data.score_metric || 'PIR');
             // Only update when a value actually changed - a fresh object identity
-            // alone used to refire the fetch effect and waste a request.
+            // alone used to refire the fetch effect and waste a request. Position
+            // resets with the season, as on the Stats tab: the new season's list may
+            // not contain the old choice.
             setFilters(prev => {
                 const min_cr = data.min_cr || 0;
                 const max_cr = data.max_cr || 35;
-                if (prev.min_cr === min_cr && prev.max_cr === max_cr) return prev;
-                return { ...prev, min_cr, max_cr };
+                if (prev.min_cr === min_cr && prev.max_cr === max_cr && prev.position === 'All') return prev;
+                return { ...prev, min_cr, max_cr, position: 'All' };
             });
         }
         setFiltersReady(true);
@@ -173,13 +178,14 @@ export default function RecommendationsView() {
     useEffect(() => {
         if (!filtersReady || !settled) return;
         loadRecommendations();
-    }, [filtersReady, settled, filters.season, filters.last_x_games, minCr, maxCr, alpha, wEff, wMean, wCons]);
+    }, [filtersReady, settled, filters.season, filters.position, filters.last_x_games, minCr, maxCr, alpha, wEff, wMean, wCons]);
 
     const loadRecommendations = async () => {
         const seq = ++requestSeq.current;
         setLoading(true);
         const data = await fetchRecommendations({
             season: filters.season,
+            position: filters.position,
             last_x_games: filters.last_x_games,
             min_cr: minCr,
             max_cr: maxCr,
@@ -279,6 +285,19 @@ export default function RecommendationsView() {
                         value={filters.last_x_games}
                         onChange={(v) => setFilters(prev => ({ ...prev, last_x_games: v }))}
                     />
+
+                    <div className="flex flex-col gap-1">
+                        <label className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Position</label>
+                        <select
+                            value={filters.position}
+                            onChange={(e) => setFilters(prev => ({ ...prev, position: e.target.value }))}
+                            className="input-dark bg-[#0a0a0c] min-w-[120px]"
+                        >
+                            {options.positions.map(p => (
+                                <option key={p} value={p}>{p}</option>
+                            ))}
+                        </select>
+                    </div>
 
                     <div className="flex flex-col gap-1">
                         <label className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Columns</label>
