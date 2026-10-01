@@ -52,6 +52,12 @@ export default function Sidebar({ activeTab, setActiveTab }) {
                         >
                             <Icon size={20} />
                             {item.label}
+                            {item.badge && (
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wider leading-none
+                                                 bg-purple-500/20 text-purple-200 border border-purple-500/30">
+                                    {item.badge}
+                                </span>
+                            )}
                             {item.id === 'live' && gameOn && (
                                 <span className="ml-auto" title="A game is on"><LiveDot /></span>
                             )}

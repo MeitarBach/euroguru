@@ -47,7 +47,14 @@ export default function MobileNav({ activeTab, setActiveTab }) {
                                 <Lock size={9} className="absolute -top-1 -right-2 text-gray-500" aria-label="Preview until you sign in" />
                             )}
                         </span>
-                        <span className="text-[10px] font-medium leading-none">{item.short}</span>
+                        <span className="flex items-center gap-1 text-[10px] font-medium leading-none">
+                            {item.short}
+                            {item.badge && (
+                                <span className="px-1 py-px rounded-sm text-[7px] font-bold uppercase tracking-wide bg-purple-500/25 text-purple-200">
+                                    {item.badge}
+                                </span>
+                            )}
+                        </span>
                     </button>
                 );
             })}
