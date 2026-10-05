@@ -4,7 +4,8 @@ The EuroGuru posting calendar: generates each post when it is due and publishes 
 
     python social.py status              # this round's calendar and what has happened
     python social.py tick                # do whatever is due now (the hourly job runs this)
-    python social.py approve [--yes]     # publish posts waiting for approval
+    python social.py next [--he]         # post the next waiting post by hand, guided
+    python social.py approve [--yes]     # publish waiting posts through the X API (needs credits)
     python social.py live                # cards for replying under game posts, right now
     python social.py profile             # the X profile banner
     python social.py install | uninstall # the hourly job on this Mac (launchd)
@@ -29,7 +30,9 @@ State lives in social/state.json, so nothing is ever posted twice.
 
 import json
 import os
+import re
 import subprocess
+import urllib.parse
 import sys
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
@@ -48,6 +51,12 @@ PRE_SLOTS = [("consistent-by-position", -48), ("budget-picks", -48), ("hot-hand"
 # Recap slots: (post id, days after the round's last game day, local hour).
 POST_SLOTS = [("round-top-performers", 1, 9), ("team-of-the-round", 1, 9), ("round-thread", 1, 13),
               ("round-bargains", 1, 18), ("price-movers", 2, 12)]
+# Posted by hand, so the default is the posts that earn the most for a minute's work:
+# a preview people act on, a poll (the most engaging format there is), each game night
+# while people are still talking about it, and the round's best lineup. SOCIAL_LEVEL=full
+# adds the rest of the catalogue.
+CORE = {"budget-picks", "hot-hand", "captain-poll", "game-night", "team-of-the-round"}
+
 # How late a slot may still go out (a Mac that was asleep): previews never after lock.
 MAX_LATE = {"post": timedelta(days=3), "night": timedelta(hours=14)}
 
@@ -124,14 +133,18 @@ def publish_entry(entry, langs=("en", "he")):
     return "en" in sent
 
 
+def wanted(slot):
+    return os.environ.get("SOCIAL_LEVEL") == "full" or slot["id"] in CORE
+
+
 def tick():
     xpost.load_env()
     autopost = os.environ.get("SOCIAL_AUTOPOST") == "1" and xpost.credentials("en")
     now = datetime.now(timezone.utc)
     state = load_state()
     games = gen.schedule()
-    ready = 0
-    for slot in calendar(games, now):
+    fresh = []
+    for slot in (s for s in calendar(games, now) if wanted(s)):
         entry = state.get(slot["key"], {})
         if entry.get("status") in ("posted", "skipped") or now < slot["at"]:
             continue
@@ -149,20 +162,20 @@ def tick():
             if slot["id"] not in made:
                 log(f"waiting {slot['key']}: {'; '.join(notes) or 'nothing to post yet'}")
                 continue
-            entry = {"key": slot["key"], "file": str(out / f"{slot['id']}.json"), "status": "ready"}
+            entry = {"key": slot["key"], "file": str(out / f"{slot['id']}.json"), "status": "ready",
+                     "until": slot["until"].isoformat()}
             state[slot["key"]] = entry
             save_state(state)
+            fresh.append(slot["id"])
         if autopost:
             try:
                 if publish_entry(entry):
                     entry["status"] = "posted"
             except Exception as exc:
                 log(f"failed {slot['key']}: {exc}")
-        else:
-            ready += 1
         save_state(state)
-    if ready:
-        notify(f"{ready} post(s) ready - run: social.py approve")
+    if fresh and not autopost:
+        notify(f"Ready to post: {', '.join(fresh)} - run: social.py next")
     save_state(state)
 
 
@@ -197,10 +210,95 @@ def approve(yes=False):
         save_state(state)
 
 
+def _clip_text(text):
+    subprocess.run(["pbcopy"], input=text.encode(), check=False)
+
+
+def _clip_image(path):
+    """Put a PNG on the clipboard, so it pastes straight into X's composer (⌘V)."""
+    script = f'set the clipboard to (read (POSIX file "{path}") as «class PNGf»)'
+    subprocess.run(["osascript", "-e", script], capture_output=True, check=False)
+
+
+def _open(url):
+    subprocess.run(["open", url], check=False)
+
+
+def _intent(text, reply_to=None):
+    params = {"text": text}
+    if reply_to:
+        params["in_reply_to"] = reply_to
+    return "https://x.com/intent/post?" + urllib.parse.urlencode(params)
+
+
+def next_post(lang="en"):
+    """Walk through the next post waiting to go out, by hand, in as few clicks as possible:
+    the composer opens with the text filled in and the image on the clipboard (⌘V to attach);
+    paste back the new post's link and the reply opens, link filled in."""
+    now = datetime.now(timezone.utc)
+    state = load_state()
+    waiting = []
+    for entry in state.values():
+        if entry.get("status") != "ready":
+            continue
+        until = entry.get("until")
+        if until and datetime.fromisoformat(until) < now:
+            entry["status"] = "missed"
+            continue
+        waiting.append(entry)
+    save_state(state)
+    if not waiting:
+        print("Nothing waiting. The next post will be announced with a notification.")
+        return
+    waiting.sort(key=lambda e: e["key"])
+    entry = waiting[0]
+    post = json.loads(Path(entry["file"]).read_text())
+    t = post["tweets"][lang]
+    print(f"\n=== {entry['key']} ({len(waiting)} waiting) ===\n")
+
+    if t.get("thread"):
+        print("A thread: post the first part, then add each next part with the + in the composer.")
+        if post.get("image"):
+            _clip_image(post["image"])
+            print("(image on the clipboard - ⌘V into the first post)")
+        _open(_intent(t["thread"][0]))
+        for i, part in enumerate(t["thread"][1:], 2):
+            input(f"\nEnter to copy part {i}/{len(t['thread'])} ...")
+            _clip_text(part)
+            print(part)
+    else:
+        if t.get("poll"):
+            print("A poll: in the composer, click the poll icon and add these options:")
+            for option in t["poll"]["options"]:
+                print(f"   • {option}")
+            print(f"   length: {t['poll']['minutes'] // 60}h (or until the round locks)\n")
+        elif post.get("image"):
+            _clip_image(post["image"])
+            print("Image is on the clipboard - press ⌘V in the composer to attach it.")
+        _open(_intent(t["main"]))
+        print("\nThe composer is open with the text. Post it.")
+        link = input("\nPaste the new post's link (Enter to skip the reply): ").strip()
+        tweet_id = re.search(r"status/(\d+)", link)
+        if tweet_id:
+            _open(_intent(t["reply"], reply_to=tweet_id.group(1)))
+            print("The reply is open, link filled in. Post it.")
+            entry.setdefault("posted", {})[lang] = [tweet_id.group(1)]
+    answer = input("\nDone? [Y = posted / s = skip it / n = keep it for later] ").strip().lower() or "y"
+    if answer == "y":
+        entry["status"] = "posted"
+        log(f"posted {entry['key']} by hand")
+    elif answer == "s":
+        entry["status"] = "skipped"
+    save_state(state)
+    rest = len(waiting) - (answer in ("y", "s"))
+    if rest:
+        print(f"{rest} more waiting - run it again.")
+
+
 def status():
     now = datetime.now(timezone.utc)
     state = load_state()
-    for slot in calendar(gen.schedule(), now):
+    for slot in (s for s in calendar(gen.schedule(), now) if wanted(s) or s["key"] in state):
         entry = state.get(slot["key"], {})
         when = slot["at"].astimezone(gen.PARIS).strftime("%a %d %b %H:%M")
         mark = entry.get("status") or ("due" if slot["at"] <= now <= slot["until"] else
@@ -209,10 +307,12 @@ def status():
 
 
 def live():
+    """Tonight's leaders as a card, put straight on the clipboard for a reply (⌘V)."""
     _, out, made, notes = gen.generate("live")
     for post_id, post in made.items():
         t = post["tweets"]["en"]
-        print(f"{post['image']}\n\n{t['main']}\n")
+        _clip_image(post["image"])
+        print(f"{post['image']}\n(on the clipboard - ⌘V into a reply)\n\n{t['main']}\n")
     for note in notes:
         print(f"! {note}")
     if not made:
@@ -275,6 +375,8 @@ if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "status"
     if cmd == "tick":
         tick()
+    elif cmd == "next":
+        next_post("he" if "--he" in sys.argv else "en")
     elif cmd == "approve":
         approve("--yes" in sys.argv)
     elif cmd == "live":

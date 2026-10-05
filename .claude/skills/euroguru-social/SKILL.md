@@ -14,8 +14,10 @@ The full growth routine lives in `docs/growth/PLAYBOOK.md`; this skill is the ma
   A recap batch also writes `reddit.md`.
 - `xpost.py`: publishes a post through the X API (OAuth 1.0a, standard library).
   `selftest`, `whoami`, `publish <json> [--lang en|he] [--yes]`.
-- `social.py`: the calendar. `status`, `tick` (what launchd runs every 30 min), `approve`,
-  `live`, `profile` (X banner), `install` / `uninstall` (the launchd job).
+- `social.py`: the calendar. `status`, `tick` (what launchd runs every 30 min), `next`
+  (guided manual posting: opens X's composer with the text, image on the clipboard, then
+  the reply with the link), `live` (reply card → clipboard), `profile` (X banner),
+  `approve` (API posting), `install` / `uninstall` (the launchd job).
 - `card.html` / `card.css` / `banner.html`: the look (dark, purple glow, court lines,
   mascot, eurogurufantasy.com footer).
 
@@ -26,8 +28,11 @@ The full growth routine lives in `docs/growth/PLAYBOOK.md`; this skill is the ma
   post types bring visitors.
 - Polls carry no image (X does not allow both). Threads carry the image on the first post
   and the link on the last.
-- Never post from this skill without the user: `social.py` publishes only when the user has
-  set `SOCIAL_AUTOPOST=1` (and X keys) in `backend/.env`, or when they approve.
+- **The user posts by hand** (X's API needs paid credits). `tick` only prepares posts and
+  notifies; the user publishes with `social.py next`. API posting happens only if they set
+  `SOCIAL_AUTOPOST=1` in `backend/.env` after buying credits. Never post on their behalf.
+- By default only the **core** posts are scheduled (`CORE` in `social.py`: budget-picks,
+  hot-hand, captain-poll, game-night, team-of-the-round); `SOCIAL_LEVEL=full` adds the rest.
 
 ## The calendar (per round; T = first tip-off, Europe/Paris)
 | Slot | Posts |
