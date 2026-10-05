@@ -740,13 +740,148 @@ def write_readme(rnd, mode, out, made, notes):
     (out / "README.md").write_text("\n".join(md) + "\n")
 
 
+# --- prepare: everything for right now, and the plan ---------------------------------
+
+# The posts worth a minute of manual posting, in the order they go out. The rest of the
+# catalogue is generated too and listed as optional.
+CORE = {"budget-picks", "hot-hand", "captain-poll", "game-night", "team-of-the-round"}
+
+
+def _local(dt):
+    return dt.astimezone().strftime("%a %d %b, %H:%M")
+
+
+def _next_morning(dt, hour=9):
+    """The next morning at `hour`, local time, after an instant."""
+    local = dt.astimezone()
+    day = local.date() + timedelta(days=1 if local.hour >= 4 else 0)
+    return datetime.combine(day, datetime.min.time()).replace(hour=hour).astimezone()
+
+
+def prepare():
+    """Work out where the season is, generate what is relevant now, and write the plan:
+    what to post, when, from which files."""
+    games = schedule()
+    now = datetime.now(timezone.utc)
+    items = []  # (when, post, core, path)
+    notes = []
+
+    def add(when, post, folder):
+        items.append((when, post, post["id"] in CORE, folder))
+
+    # 1. A round that just finished: its recap.
+    done = last_finished_round(games)
+    if done:
+        last = max(g["tipoff"] for g in games if g["round"] == done)
+        if now - last < timedelta(hours=36):  # a recap older than that is stale
+            _, out, made, n = generate("post", done)
+            notes += n
+            morning = _next_morning(last + timedelta(hours=2))
+            slots = {"team-of-the-round": morning, "round-top-performers": morning,
+                     "round-thread": morning + timedelta(hours=4), "round-bargains": morning + timedelta(hours=9),
+                     "price-movers": morning + timedelta(days=1, hours=3)}
+            for pid, post in made.items():
+                add(max(slots.get(pid, morning), now), post, out)
+
+    # 2. Game nights that have finished in the last 14 hours.
+    for day in sorted({g["tipoff"].astimezone(PARIS).date() for g in games}):
+        tonight = [g for g in games if g["tipoff"].astimezone(PARIS).date() == day]
+        end = max(g["tipoff"] for g in tonight) + timedelta(hours=2.5)
+        if end <= now <= end + timedelta(hours=14):
+            _, out, made, n = generate("night", tonight[0]["round"], night=day)
+            notes += n
+            for post in made.values():
+                add(now, post, out)
+
+    # 3. The next round, if it has not locked yet: its preview.
+    nxt = next_round(games)
+    first = min((g["tipoff"] for g in games if g["round"] == nxt), default=None)
+    if first and first > now:
+        _, out, made, n = generate("pre", nxt)
+        notes += n
+        slots = {"budget-picks": first - timedelta(hours=48), "consistent-by-position": first - timedelta(hours=46),
+                 "hot-hand": first - timedelta(hours=26), "value-kings": first - timedelta(hours=24),
+                 "injury-watch": first - timedelta(hours=8), "smart-picks": first - timedelta(hours=6),
+                 "captain-poll": first - timedelta(hours=5)}
+        for pid, post in made.items():
+            add(max(slots.get(pid, now), now), post, out)
+        nights = sorted({g["tipoff"].astimezone(PARIS).date() for g in games if g["round"] == nxt})
+        notes.append(f"Round {nxt} locks {_local(first)}. Game nights: "
+                     + ", ".join(d.strftime("%a %d %b") for d in nights)
+                     + " - run /euroguru-social again after each night's games for its top-5 post.")
+    elif first:
+        notes.append(f"Round {nxt} is in progress - run again after each game night, and after the round for its recap.")
+
+    items.sort(key=lambda i: (i[0], not i[2]))
+    write_plan(items, notes, now)
+    return items, notes
+
+
+def write_plan(items, notes, now):
+    md = ["# What to post", f"Prepared {_local(now)}. Times are your local time.", ""]
+    core = [i for i in items if i[2]]
+    extra = [i for i in items if not i[2]]
+    for title, group in (("Core posts", core), ("Optional (if you have time)", extra)):
+        if not group:
+            continue
+        md += [f"## {title}", ""]
+        for n, (when, post, _, folder) in enumerate(group, 1):
+            t = post["tweets"]["en"]
+            label = "now" if when <= now + timedelta(minutes=30) else _local(when)
+            md += [f"### {n}. {post['id']} - post {label}"]
+            if post.get("image"):
+                md += [f"Image: `{Path(post['image']).relative_to(REPO)}`"]
+            if t.get("thread"):
+                md += ["Thread - post each part as a reply to the previous one:", ""]
+                for part in t["thread"]:
+                    md += ["```", part, "```"]
+            else:
+                md += ["", "Post:", "```", t["main"], "```"]
+                if t.get("poll"):
+                    md += [f"Add a poll with: {' / '.join(t['poll']['options'])} (open until the round locks)", ""]
+                md += ["Then reply to your own post with:", "```", t["reply"], "```"]
+            md += [f"Hebrew version: `{(Path(folder) / (post['id'] + '.json')).relative_to(REPO)}` → tweets.he", ""]
+    if notes:
+        md += ["## Notes", *[f"- {n}" for n in notes]]
+    (OUT_ROOT / "PLAN.md").write_text("\n".join(md) + "\n")
+
+
+def render_banner():
+    """The X profile banner (1500x500), in the post cards' look."""
+    out = OUT_ROOT / "profile"
+    out.mkdir(parents=True, exist_ok=True)
+    page = (SKILL / "banner.html").read_text()
+    page = page.replace("{{css}}", (SKILL / "card.css").as_uri()).replace("{{mascot}}", MASCOT.as_uri())
+    tmp = out / "_banner.html"
+    tmp.write_text(page)
+    png = out / "banner.png"
+    subprocess.run([CHROME, "--headless=new", "--disable-gpu", "--hide-scrollbars", "--force-device-scale-factor=2",
+                    "--window-size=1500,500", "--virtual-time-budget=3000", "--allow-file-access-from-files",
+                    f"--screenshot={png}", tmp.as_uri()], check=True, capture_output=True, timeout=90)
+    tmp.unlink(missing_ok=True)
+    return png
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("mode", choices=["pre", "post", "night", "live"])
+    ap.add_argument("mode", choices=["prepare", "pre", "post", "night", "live", "banner"])
     ap.add_argument("--round", type=int, help="round number (default: chosen from the schedule)")
     ap.add_argument("--date", help="game night date, YYYY-MM-DD (night mode; default today)")
     ap.add_argument("--only", help="comma-separated post ids")
     args = ap.parse_args()
+    if args.mode == "banner":
+        print(render_banner())
+        return
+    if args.mode == "prepare":
+        items, notes = prepare()
+        now = datetime.now(timezone.utc)
+        for when, post, core, _ in items:
+            label = "now" if when <= now + timedelta(minutes=30) else _local(when)
+            print(f"{'★' if core else ' '} {label:22} {post['id']}  (longest tweet {tweet_lengths(post['tweets'])}/280)")
+        for note in notes:
+            print(f"! {note}")
+        print(f"\nPlan: {(OUT_ROOT / 'PLAN.md').relative_to(REPO)}")
+        return
     night = datetime.strptime(args.date, "%Y-%m-%d").date() if args.date else None
     rnd, out, made, notes = generate(args.mode, args.round, set(args.only.split(",")) if args.only else None, night)
     for post_id, post in made.items():
