@@ -33,6 +33,24 @@ before) → captain-poll (~5h before lock; add the poll options in X's composer)
 game-night (after each evening) → team-of-the-round (morning after). Everything else in
 PLAN.md is optional.
 
+## How every post is written (keep new posts to this)
+Researched for the #EuroLeagueFantasy niche (Oct 2026): image posts and polls draw the
+most interaction, shorter posts get more replies, and opinion + question starts debate.
+1. **Hook** - what EuroGuru's data found, naming EuroGuru's feature behind it (live
+   tracking, the reliability score, the model, the price tracker).
+2. **The data** - 3–5 compact lines; the image carries the full list. When the text runs
+   long, `compose()` drops trailing lines, never the hook or the question.
+3. **A punchline** where the data allows (e.g. "Diarra out-scores 14 players priced 14+ CR").
+4. **A debate question** people have an opinion on (`DEBATE` in `generate.py`).
+5. `#EuroLeagueFantasy #EBF` - the game's hashtag and the official account's.
+The link always goes in the user's own first reply.
+
+## Coaching the comment section on the user's own posts
+Debate posts only grow if the debate gets answered - the first hour matters most. When the
+user pastes comments from their post, suggest a short reply to each: agree or push back
+with **one number** from the API, ask a follow-up question, keep it friendly and
+in the commenter's language. Never argue; reward every comment with an answer.
+
 ## Reply coaching (the user pastes posts)
 
 Replies under bigger accounts are the main way this account grows. When the user pastes a

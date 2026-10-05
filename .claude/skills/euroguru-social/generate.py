@@ -284,9 +284,9 @@ def post_consistent(ctx):
         "body": cols_body([{"pos": p["position"], "name": p["PlayerName"], "team": p["Team"],
                             "big": num(p["Average_Score"]), "unit": "avg FPT",
                             "meta": [("SD", num(p.get("StdDev_Score") or 0)), ("CR", num(p["CR"]))]} for p in picks]),
-        "hook": f"Round {r}: the most consistent healthy player at every position 🎯",
-        "hook_he": f"מחזור {r}: השחקן הכי יציב (ובריא) בכל עמדה 🎯",
-        "lines": [f"{p['position']}: {surname(p['PlayerName'])} · {num(p['Average_Score'])} FPT · "
+        "hook": f"🎯 The safest pick at every position for Round {r}, by EuroGuru's reliability score:",
+        "hook_he": f"🎯 הבחירה הכי בטוחה בכל עמדה למחזור {r}, לפי ציון האמינות של EuroGuru:",
+        "lines": [f"{p['position']} {surname(p['PlayerName'])} · {num(p['Average_Score'])} avg · "
                   f"SD {num(p.get('StdDev_Score') or 0)} · {num(p['CR'])} CR" for p in picks],
     }
 
@@ -303,8 +303,8 @@ def post_hot(ctx):
         "body": list_body([{"pos": p["position"], "name": p["PlayerName"], "detail": p["Team"],
                             "side": f"<b>{num(p['CR'])}</b> CR", "big": num(p["Average_Score"]), "unit": "LAST 3"}
                            for p in rows]),
-        "hook": f"🔥 Hottest players before Round {r} (avg FPT, last 3 games)",
-        "hook_he": f"🔥 השחקנים הכי חמים לפני מחזור {r} (ממוצע FPT ב-3 המשחקים האחרונים)",
+        "hook": f"🔥 Hottest players before Round {r} (last 3 games), via EuroGuru:",
+        "hook_he": f"🔥 הכי חמים לפני מחזור {r} (3 משחקים אחרונים), לפי EuroGuru:",
         "lines": [f"{i}. {surname(p['PlayerName'])} {num(p['Average_Score'])} · {num(p['CR'])} CR"
                   for i, p in enumerate(rows, 1)],
     }
@@ -317,14 +317,18 @@ def post_budget(ctx):
     if not rows:
         return None
     r = ctx["round"]
+    beaten = sum(1 for p in ctx["last5"] if p.get("Average_Score") is not None and p["CR"] >= 14
+                 and p["Average_Score"] < rows[0]["Average_Score"])
     return {
         "title": "Budget picks: 10 CR or less",
         "subtitle": "Best average FPT over the last 5 games among healthy players at ≤10 CR",
         "body": list_body([{"pos": p["position"], "name": p["PlayerName"], "detail": p["Team"],
                             "side": f"<b>{num(p['CR'])}</b> CR", "big": num(p["Average_Score"]), "unit": "AVG FPT"}
                            for p in rows]),
-        "hook": f"💰 Round {r} budget picks (≤10 CR)",
-        "hook_he": f"💰 מציאות למחזור {r} (עד 10 קרדיט)",
+        "insight": (f"{surname(rows[0]['PlayerName'])} out-scores {beaten} players priced 14+ CR." if beaten else None),
+        "insight_he": (f"{surname(rows[0]['PlayerName'])} מקדים {beaten} שחקנים שעולים 14+ קרדיט." if beaten else None),
+        "hook": f"💰 No need to pay 15 CR. EuroGuru's best ≤10 CR picks for Round {r}:",
+        "hook_he": f"💰 לא חייבים לשלם 15 קרדיט. המציאות של EuroGuru עד 10 קרדיט למחזור {r}:",
         "lines": [f"{p['position']} {surname(p['PlayerName'])} · {num(p['Average_Score'])} FPT · {num(p['CR'])} CR"
                   for p in rows],
     }
@@ -345,8 +349,8 @@ def post_value(ctx):
         "body": cols_body([{"pos": p["position"], "name": p["PlayerName"], "team": p["Team"],
                             "big": num(p["Value"], 2), "unit": "FPT / CR",
                             "meta": [("Avg", num(p["Average_Score"])), ("CR", num(p["CR"]))]} for p in picks]),
-        "hook": f"👑 Value kings before Round {r}: most FPT per credit",
-        "hook_he": f"👑 מלכי התמורה לפני מחזור {r}: הכי הרבה FPT לכל קרדיט",
+        "hook": f"👑 Most FPT per credit at each position before Round {r}, via EuroGuru:",
+        "hook_he": f"👑 הכי הרבה FPT לקרדיט בכל עמדה לפני מחזור {r}, לפי EuroGuru:",
         "lines": [f"{p['position']}: {surname(p['PlayerName'])} · {num(p['Value'], 2)} FPT/CR · "
                   f"{num(p['Average_Score'])} avg · {num(p['CR'])} CR" for p in picks],
     }
@@ -364,8 +368,8 @@ def post_smart(ctx):
                             "detail": f"{num(float(x.get('Efficiency') or 0), 2)} FPT/CR efficiency",
                             "side": f"<b>{num(float(x['CR']))}</b> CR", "big": num(float(x["RecScore"])), "unit": "SCORE"}
                            for x in recs]),
-        "hook": f"🧠 EuroGuru smart picks for Round {r}",
-        "hook_he": f"🧠 ההמלצות של EuroGuru למחזור {r}",
+        "hook": f"🧠 EuroGuru's model (form × value × consistency) top 5 for Round {r}:",
+        "hook_he": f"🧠 הטופ 5 של המודל של EuroGuru (כושר × תמורה × עקביות) למחזור {r}:",
         "lines": [f"{i}. {surname(x['PlayerName'])} ({x.get('position', '')}) · {num(float(x['CR']))} CR"
                   for i, x in enumerate(recs, 1)],
     }
@@ -385,8 +389,8 @@ def post_injuries(ctx):
                             "detail": f"{p['Team']} · {injury}" if injury else p["Team"],
                             "side": f"avg <b>{num(p['Average_Score'])}</b>" if p.get("Average_Score") is not None else "",
                             "big": num(p["CR"]), "unit": "CR", "tag": (tag.lower(), tag)} for p, tag, injury in hit]),
-        "hook": f"🚑 Injury watch before Round {r}",
-        "hook_he": f"🚑 מעקב פציעות לפני מחזור {r}",
+        "hook": f"🚑 Before you lock Round {r}: the priciest names on the injury report",
+        "hook_he": f"🚑 לפני שנועלים את מחזור {r}: השחקנים הכי יקרים ברשימת הפציעות",
         "lines": [f"{tag} · {surname(p['PlayerName'])} ({p['Team']}) · {num(p['CR'])} CR" for p, tag, _ in hit],
     }
 
@@ -400,9 +404,9 @@ def post_captain_poll(ctx):
     r = ctx["round"]
     minutes = int((ctx["lock"] - datetime.now(timezone.utc)).total_seconds() // 60) if ctx.get("lock") else 1440
     return {
-        "hook": f"🧢 Round {r} captain: who gets the armband?",
-        "hook_he": f"🧢 מחזור {r}: את מי אתם שמים קפטן?",
-        "lines": [f"{surname(p['PlayerName'])}: {num(p['Average_Score'])} FPT avg, last 5" for p in rows],
+        "hook": f"🧢 Captain counts double. Who gets your Round {r} armband? (avg FPT, last 5)",
+        "hook_he": f"🧢 הקפטן שווה כפול. למי הסרט במחזור {r}? (ממוצע FPT, 5 אחרונים)",
+        "lines": [f"{surname(p['PlayerName'])} {num(p['Average_Score'])}" for p in rows],
         "poll": {"options": [f"{surname(p['PlayerName'])} ({p['Team']})"[:25] for p in rows],
                  "minutes": max(60, min(10080, minutes))},
     }
@@ -419,8 +423,8 @@ def post_top_performers(ctx):
         "body": list_body([{"pos": x["position"], "name": x["PlayerName"],
                             "detail": f"{x['pts']} PTS · {x['reb']} REB · {x['ast']} AST vs {x['vs']}",
                             "side": f"<b>{num(x['CR'])}</b> CR", "big": num(x["fpt"]), "unit": "FPT"} for x in rows]),
-        "hook": f"⭐ Round {r} top performers",
-        "hook_he": f"⭐ הכוכבים של מחזור {r}",
+        "hook": f"⭐ Round {r}'s biggest fantasy scores, tracked live on EuroGuru:",
+        "hook_he": f"⭐ הניקודים הגדולים של מחזור {r}, במעקב חי ב-EuroGuru:",
         "lines": [f"{i}. {surname(x['PlayerName'])} {num(x['fpt'])} FPT ({x['pts']}p {x['reb']}r {x['ast']}a)"
                   for i, x in enumerate(rows, 1)],
     }
@@ -449,8 +453,8 @@ def post_team_of_round(ctx):
                             "side": f"<b>{num(x['CR'])}</b> CR", "big": num(x["fpt"] * (2 if x is captain else 1)),
                             "unit": "FPT ×2" if x is captain else "FPT",
                             "tag": ("c", "C") if x is captain else None} for x in team]),
-        "hook": f"🏆 Round {r} team of the round: {num(total)} FPT",
-        "hook_he": f"🏆 החמישייה של מחזור {r}: {num(total)} FPT",
+        "hook": f"🏆 The perfect Round {r} lineup (2G 2F 1C, captain ×2) scored {num(total)} FPT:",
+        "hook_he": f"🏆 החמישייה המושלמת של מחזור {r} (2G 2F 1C, קפטן כפול) עשתה {num(total)} FPT:",
         "lines": [f"{x['position']} {surname(x['PlayerName'])} {num(x['fpt'])}{' (C)' if x is captain else ''}" for x in team],
     }
 
@@ -467,8 +471,8 @@ def post_bargains(ctx):
                             "detail": f"{num(x['fpt'])} FPT · {num(x['CR'])} CR",
                             "side": f"{el_code(x)} vs {x['vs']}", "big": num(x["fpt"] / x["CR"], 2), "unit": "FPT / CR"}
                            for x in rows]),
-        "hook": f"💎 Round {r} bargains (≤10 CR, FPT per credit)",
-        "hook_he": f"💎 המציאות של מחזור {r} (עד 10 קרדיט, FPT לקרדיט)",
+        "hook": f"💎 Round {r}'s best value for money - most FPT per credit at ≤10 CR, via EuroGuru:",
+        "hook_he": f"💎 התמורה הכי טובה של מחזור {r} - הכי הרבה FPT לקרדיט עד 10 קרדיט, לפי EuroGuru:",
         "lines": [f"{surname(x['PlayerName'])} {num(x['fpt'])} FPT · {num(x['CR'])} CR" for x in rows],
     }
 
@@ -495,8 +499,8 @@ def post_price_movers(ctx):
         "body": list_body([{"pos": p["position"], "name": p["playerName"], "detail": p["team"],
                             "side": f"now <b>{num(cr)}</b> CR", "big": f"{'+' if d > 0 else ''}{num(d)}",
                             "unit": "CR", "tone": "up" if d > 0 else "down"} for p, d, cr in pick]),
-        "hook": f"📈📉 Round {rnd} price movers",
-        "hook_he": f"📈📉 מי עלה ומי ירד במחיר אחרי מחזור {rnd}",
+        "hook": f"📈📉 Round {rnd} price movers, from EuroGuru's price tracker:",
+        "hook_he": f"📈📉 מי עלה ומי ירד אחרי מחזור {rnd}, לפי מעקב המחירים של EuroGuru:",
         "lines": [f"{'▲' if d > 0 else '▼'} {surname(p['playerName'])} {'+' if d > 0 else ''}{num(d)} → {num(cr)} CR"
                   for p, d, cr in pick],
     }
@@ -543,8 +547,8 @@ def post_game_night(ctx):
         "body": list_body([{"pos": x["position"], "name": x["PlayerName"],
                             "detail": f"{x['pts']} PTS · {x['reb']} REB · {x['ast']} AST vs {x['vs']}",
                             "side": f"<b>{num(x['CR'])}</b> CR", "big": num(x["fpt"]), "unit": "FPT"} for x in rows]),
-        "hook": f"🌙 {label} night's best fantasy performances (Round {ctx['round']})",
-        "hook_he": f"🌙 הביצועים הכי טובים של הערב בפנטזי (מחזור {ctx['round']})",
+        "hook": f"🌙 {label} night in fantasy points, tracked live on EuroGuru (Round {ctx['round']}):",
+        "hook_he": f"🌙 הערב בנקודות פנטזי, במעקב חי ב-EuroGuru (מחזור {ctx['round']}):",
         "lines": [f"{i}. {surname(x['PlayerName'])} {num(x['fpt'])} FPT ({x['pts']}p {x['reb']}r {x['ast']}a)"
                   for i, x in enumerate(rows, 1)],
     }
@@ -561,8 +565,8 @@ def post_live(ctx):
         "body": list_body([{"pos": x["position"], "name": x["PlayerName"],
                             "detail": f"{x['pts']} PTS · {x['reb']} REB · {x['ast']} AST vs {x['vs']}",
                             "side": f"<b>{num(x['CR'])}</b> CR", "big": num(x["fpt"]), "unit": "FPT LIVE"} for x in rows]),
-        "hook": "🔴 Live fantasy leaders right now",
-        "hook_he": "🔴 המובילים בפנטזי ברגע זה",
+        "hook": "🔴 Live on EuroGuru right now - tonight's fantasy leaders:",
+        "hook_he": "🔴 בזמן אמת ב-EuroGuru - המובילים בפנטזי הערב:",
         "lines": [f"{surname(x['PlayerName'])} {num(x['fpt'])} FPT ({x['pts']}p {x['reb']}r {x['ast']}a)" for x in rows],
     }
 
@@ -575,7 +579,30 @@ POST = [("round-top-performers", post_top_performers), ("team-of-the-round", pos
 NIGHT = [("game-night", post_game_night)]
 LIVE = [("live-leaders", post_live)]
 
-TAG = "#EuroLeagueFantasy"
+# The game's own hashtag plus the one the official account (@EBF_Official) uses.
+TAG = "#EuroLeagueFantasy #EBF"
+
+# Every post ends by handing the conversation to the reader: a question people have an
+# opinion on, so the replies fill with debate - which is what X rewards with reach.
+DEBATE = {
+    "consistent-by-position": ("Safe floor or too boring? Who did we miss? 👇",
+                               "רצפה בטוחה או משעמם? מי השחקן היציב ששכחנו? 👇"),
+    "hot-hand": ("Ride the hot hand or sell high? Who cools off first? 👇",
+                 "רוכבים על הכושר או מוכרים בשיא? מי יתקרר ראשון? 👇"),
+    "budget-picks": ("Which cheap pick are you riding? 👇",
+                     "על איזו מציאה אתם הולכים המחזור? 👇"),
+    "value-kings": ("Who's the steal of the season so far? 👇", "מי הגניבה של העונה עד עכשיו? 👇"),
+    "injury-watch": ("Hold or sell? What are you doing with them? 👇", "מחזיקים או מוכרים? מה אתם עושים איתם? 👇"),
+    "smart-picks": ("Which one would you fade - and who's missing? 👇", "על מי הייתם מוותרים, ומי חסר? 👇"),
+    "captain-poll": ("Got a differential captain? Drop him below 👇", "יש לכם קפטן מפתיע? כתבו למטה 👇"),
+    "round-top-performers": ("How many of them did you have? 👇", "כמה מהם היו לכם? 👇"),
+    "team-of-the-round": ("How close did your team get? Drop your score 👇", "כמה קרובה הייתה הקבוצה שלכם? כתבו את הניקוד 👇"),
+    "round-bargains": ("Who's buying them for next round? 👇", "מי קונה אותם למחזור הבא? 👇"),
+    "price-movers": ("Buy the dip or sell the rise? 👇", "קונים בירידה או מוכרים בעלייה? 👇"),
+    "game-night": ("Who was your MVP tonight? 👇", "מי היה ה-MVP שלכם הערב? 👇"),
+    "live-leaders": ("Who's carrying your team tonight? 👇", "מי סוחב לכם את הקבוצה הערב? 👇"),
+    "round-thread": ("What did Round {r} teach you? 👇", "מה למדתם ממחזור {r}? 👇"),
+}
 REPLY = {"en": "Live fantasy points, stats & smart picks, free 👉 {url}",
          "he": "נקודות פנטזי בזמן אמת, סטטיסטיקות והמלצות, בחינם 👉 {url}"}
 
@@ -590,12 +617,23 @@ def compose(post_id, card, campaign):
     out = {}
     for lang in ("en", "he"):
         reply = REPLY[lang].format(url=utm(campaign, lang))
+        question = DEBATE.get(post_id, ("", ""))[0 if lang == "en" else 1]
         if "thread" in card:
             thread = card["thread" if lang == "en" else "thread_he"]
-            out[lang] = {"thread": [*thread, reply]}
+            round_no = re.search(r"\d+", campaign).group().lstrip("0")
+            out[lang] = {"thread": [*thread, question.format(r=round_no), reply]}
             continue
         hook = card["hook" if lang == "en" else "hook_he"]
-        main = "\n".join([hook, "", *card["lines"], "", TAG])
+        insight = card.get("insight" if lang == "en" else "insight_he")
+        # The image carries the full list, so when the text runs long the last player
+        # lines go - never the hook, the punchline or the question.
+        lines = list(card["lines"])
+        while True:
+            main = "\n".join(x for x in [hook, "", *lines, "", insight, question, "", TAG] if x is not None)
+            main = re.sub(r"\n{3,}", "\n\n", main)
+            if x_length(main) <= 275 or len(lines) <= 3:
+                break
+            lines.pop()
         out[lang] = {"main": main, "reply": reply}
         if card.get("poll"):
             out[lang]["poll"] = card["poll"]
