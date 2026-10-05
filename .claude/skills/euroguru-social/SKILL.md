@@ -1,90 +1,59 @@
 ---
 name: euroguru-social
-description: Generate EuroGuru's round-by-round Twitter/X posts - tweet text plus a branded 1200x675 image for each - before a fantasy round (preview) or after one (recap). Use when the user asks for pre-round / post-round / round preview / round recap posts, social or Twitter content, or runs /euroguru-social pre|post [round].
+description: EuroGuru's Twitter/X content engine - generates, schedules and publishes round-by-round posts (previews, captain poll, game nights, recaps, a "what we learned" thread, live cards for replies) with branded images, in English and Hebrew. Use when the user asks for round preview / recap posts, social or Twitter content, live reply cards, the posting calendar, approving or publishing posts, or runs /euroguru-social.
 ---
 
-# EuroGuru social posts
+# EuroGuru social
 
-Produces a fixed, repeatable set of posts for every EuroLeague Fantasy round, so the
-account has the same structure every week. Each post is a tweet (`<id>.txt`) and a
-branded image (`<id>.png`) in `social/round-XX/{pre,post}/` at the repo root, plus a
-`README.md` listing the run. `social/` is git-ignored.
+The full growth routine lives in `docs/growth/PLAYBOOK.md`; this skill is the machinery.
 
-**Never post anything yourself.** Generate, check, and hand the posts to the user.
+## Pieces
+- `generate.py`: builds posts. `python3 generate.py pre|post|night|live [--round N] [--date YYYY-MM-DD] [--only ids]`.
+  Each post is `<id>.json` (tweets in `en` and `he`: `main` + `reply`, or a `poll`, or a
+  `thread`), `<id>.png` (1200x675 card) and a `README.md`, in `social/round-XX/<batch>/`.
+  A recap batch also writes `reddit.md`.
+- `xpost.py`: publishes a post through the X API (OAuth 1.0a, standard library).
+  `selftest`, `whoami`, `publish <json> [--lang en|he] [--yes]`.
+- `social.py`: the calendar. `status`, `tick` (what launchd runs every 30 min), `approve`,
+  `live`, `profile` (X banner), `install` / `uninstall` (the launchd job).
+- `card.html` / `card.css` / `banner.html`: the look (dark, purple glow, court lines,
+  mascot, eurogurufantasy.com footer).
 
-## Run it
+## Rules every post follows
+- The **main tweet has no link** (X shows link posts to far fewer people) and one hashtag,
+  `#EuroLeagueFantasy`. The **link goes in the first reply**, with UTM tags
+  (`utm_source=x|x-he`, `utm_campaign=rNN-<post id>`), so Vercel Analytics shows which
+  post types bring visitors.
+- Polls carry no image (X does not allow both). Threads carry the image on the first post
+  and the link on the last.
+- Never post from this skill without the user: `social.py` publishes only when the user has
+  set `SOCIAL_AUTOPOST=1` (and X keys) in `backend/.env`, or when they approve.
 
-From the repo root:
+## The calendar (per round; T = first tip-off, Europe/Paris)
+| Slot | Posts |
+|---|---|
+| T−48h | consistent-by-position, budget-picks |
+| T−26h | hot-hand, value-kings |
+| T−8h / −6h / −5h | injury-watch, smart-picks, captain-poll |
+| each game day, last tip-off + 2.5h | game-night |
+| next morning 09:00 | round-top-performers, team-of-the-round |
+| 13:00 / 18:00 | round-thread, round-bargains |
+| day after, 12:00 | price-movers (waits for the round's CR snapshot) |
 
-```bash
-# On the work network (Cloudflare WARP) Python needs the proxy's root certificate.
-# backend/.ca-bundle.pem is built by run_euroguru.sh; build it the same way if missing.
-export SSL_CERT_FILE="$PWD/backend/.ca-bundle.pem"
+Previews never go out after lock; late recaps up to 3 days, game nights up to 14h.
+State is in `social/state.json` (nothing is posted twice); the log is `social/social.log`.
 
-python3 .claude/skills/euroguru-social/generate.py pre              # preview of the next round
-python3 .claude/skills/euroguru-social/generate.py post             # recap of the last finished round
-python3 .claude/skills/euroguru-social/generate.py post --round 3   # a specific round
-python3 .claude/skills/euroguru-social/generate.py pre --only hot-hand,budget-picks
-```
+## When asked to generate or check posts
+1. On the work network: `export SSL_CERT_FILE="$PWD/backend/.ca-bundle.pem"`.
+2. Run the generator (or `social.py status` / `tick`), then open each PNG with Read and check
+   the layout and numbers; every tweet's X length (links 23, emoji 2) is printed and must
+   be ≤280.
+3. Show the user each post's image path and text. Mention skipped posts and why.
 
-Standard library only; images render with the installed Google Chrome (headless).
-Pre-round posts read the public EuroGuru API (`https://euroguru-api.vercel.app/api`),
-so they reflect the last promoted data. Post-round posts read Euroleague's boxscores
-directly and score them exactly as the fantasy game does (PIR, plus 10% of |PIR| for the
-winning team), so they need no fetch.
-
-## When to run
-- **pre**: after the previous round's data has been fetched and promoted, before the
-  next round tips off.
-- **post**: once the round's last game is final. `price-movers` also needs the round's
-  CR snapshot - run the fetch and `promote.py` first, or it is skipped with a note.
-
-## After generating - always
-1. Read the script output: every post prints `id (length/280)`. Lengths use X's rule
-   (links count 23, emoji 2). Shorten any post flagged over 280 by editing its builder.
-2. Open each PNG with the Read tool and check the layout: nothing overlapping the footer,
-   names not truncated, numbers plausible.
-3. Spot-check the numbers against the app (e.g. top performers against a player's game
-   log via `/api/player?name=...&season=2026`).
-4. Show the user each post: the image path and the tweet text, ready to copy. Mention
-   any skipped post and why (see the Notes section of the run's README).
-
-## The catalogue
-
-Pre-round (badge "Round N · Preview"):
-| id | What it shows | Layout |
-|---|---|---|
-| `consistent-by-position` | Best healthy G/F/C by reliable floor (avg − 2×SD), 2+ games | columns |
-| `hot-hand` | Top 5 by average FPT over the last 3 games | list |
-| `budget-picks` | Top 5 healthy players at ≤10 CR by last-5 average | list |
-| `value-kings` | Best FPT per CR at each position | columns |
-| `smart-picks` | Top 5 from the Recommendations ranking | list |
-| `injury-watch` | Highest-priced players on the injury report (OUT/GTD) | list |
-
-Post-round (badge "Round N · Recap"):
-| id | What it shows | Layout |
-|---|---|---|
-| `round-top-performers` | Top 5 FPT of the round with stat lines | list |
-| `team-of-the-round` | Best 2 G · 2 F · 1 C, top scorer as captain ×2, total | list |
-| `round-bargains` | Most FPT per CR among ≤10 CR players | list |
-| `price-movers` | 3 biggest CR risers and 2 fallers after the round | list |
-
-Every tweet has the same shape: a hook line with the round and an emoji, 3–5 compact
-player lines, `Full stats & live scores 👉 https://eurogurufantasy.com`, and
-`#EuroLeagueFantasy #EuroLeague`.
-
-## Files
-- `generate.py`: data, tweet text and rendering. Each post is one `post_*` function
-  returning `{title, subtitle, body, text}` (or `None` to skip), registered in `PRE` or
-  `POST`.
-- `card.html`, `card.css`: the image - dark background, purple glow, half-court lines,
-  the EuroGuru mascot (`frontend/public/guru-mark.png`), a round badge, and a footer with
-  eurogurufantasy.com. Two body layouts: `cols_body` (three position columns) and
-  `list_body` (ranked rows).
-
-## Adding a post type
-Write a `post_<name>(ctx)` in `generate.py` using `cols_body` or `list_body` for the
-image and `tweet(...)` for the text (end with `LINK_LINE` and `TAGS`), then add
-`("<id>", post_<name>)` to `PRE` or `POST`. `ctx` holds `round`, `season` (season
-averages), and for pre `last3`, `last5`, `inj`; for post `scores` (each priced player's
-round FPT with pts/reb/ast and opponent).
+## Adding a post type or language
+- Post: a `post_<name>(ctx)` in `generate.py` returning `title, subtitle, body` (via
+  `cols_body` / `list_body`) plus `hook`, `hook_he`, `lines` (or `poll` / `thread` +
+  `thread_he`); register it in `PRE`, `POST`, `NIGHT` or `LIVE`, and give it a slot in
+  `social.py` if it should be scheduled.
+- Language: add a `hook_<lang>` / `thread_<lang>` per builder, a `REPLY[lang]`, extend the
+  loop in `compose()`, and `credentials()` in `xpost.py` for that account's keys.

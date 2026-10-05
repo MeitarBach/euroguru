@@ -6,6 +6,7 @@ The EuroGuru posting calendar: generates each post when it is due and publishes 
     python social.py tick                # do whatever is due now (the hourly job runs this)
     python social.py approve [--yes]     # publish posts waiting for approval
     python social.py live                # cards for replying under game posts, right now
+    python social.py profile             # the X profile banner
     python social.py install | uninstall # the hourly job on this Mac (launchd)
 
 Every round gets the same calendar (times are Europe/Paris, where the schedule lives):
@@ -237,6 +238,22 @@ PLIST_BODY = """<?xml version="1.0" encoding="UTF-8"?>
 """
 
 
+def profile():
+    """The X profile banner (1500x500), in the same look as the post cards."""
+    out = gen.OUT_ROOT / "profile"
+    out.mkdir(parents=True, exist_ok=True)
+    page = (Path(__file__).parent / "banner.html").read_text()
+    page = page.replace("{{css}}", (Path(__file__).parent / "card.css").as_uri()).replace("{{mascot}}", gen.MASCOT.as_uri())
+    tmp = out / "_banner.html"
+    tmp.write_text(page)
+    png = out / "banner.png"
+    subprocess.run([gen.CHROME, "--headless=new", "--disable-gpu", "--hide-scrollbars", "--force-device-scale-factor=2",
+                    "--window-size=1500,500", "--virtual-time-budget=3000", "--allow-file-access-from-files",
+                    f"--screenshot={png}", tmp.as_uri()], check=True, capture_output=True, timeout=90)
+    tmp.unlink(missing_ok=True)
+    print(png)
+
+
 def install():
     bundle = gen.REPO / "backend" / ".ca-bundle.pem"
     cert = f"<key>SSL_CERT_FILE</key><string>{bundle}</string>" if bundle.exists() else ""
@@ -262,6 +279,8 @@ if __name__ == "__main__":
         approve("--yes" in sys.argv)
     elif cmd == "live":
         live()
+    elif cmd == "profile":
+        profile()
     elif cmd == "install":
         install()
     elif cmd == "uninstall":
