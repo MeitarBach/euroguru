@@ -12,3 +12,6 @@ myenv/
 
 # OS
 .DS_Store
+
+# Generated social posts (.claude/skills/euroguru-social)
+social/

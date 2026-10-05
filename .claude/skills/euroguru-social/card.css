@@ -1,0 +1,76 @@
+/* EuroGuru social card: 1200x675, the in-feed size for X/Twitter. The look follows the
+   app - near-black, purple glow, compact data - so a post reads as a piece of it. */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 1200px; height: 675px; overflow: hidden; }
+body {
+  font-family: Inter, -apple-system, "SF Pro Display", "Helvetica Neue", Arial, sans-serif;
+  color: #fff;
+  background: #050507;
+  position: relative;
+}
+
+/* Background: two soft glows and a faint half-court, so the card is recognisably ours
+   even as a thumbnail. */
+.bg { position: absolute; inset: 0; overflow: hidden; }
+.glow { position: absolute; border-radius: 50%; filter: blur(90px); }
+.glow.a { width: 620px; height: 620px; left: -160px; top: -220px; background: rgba(139, 92, 246, 0.42); }
+.glow.b { width: 520px; height: 520px; right: -140px; bottom: -260px; background: rgba(236, 72, 153, 0.22); }
+.court { position: absolute; right: -120px; top: 50%; width: 760px; height: 760px; transform: translateY(-50%);
+  border: 2px solid rgba(255, 255, 255, 0.045); border-radius: 50%; }
+.court::before { content: ""; position: absolute; inset: 190px; border: 2px solid rgba(255, 255, 255, 0.045); border-radius: 50%; }
+.court::after { content: ""; position: absolute; left: 50%; top: -40px; bottom: -40px; border-left: 2px solid rgba(255, 255, 255, 0.04); }
+.mascot { position: absolute; right: 26px; bottom: 58px; height: 300px; opacity: 0.11; }
+
+.wrap { position: relative; height: 100%; padding: 40px 56px 0; display: flex; flex-direction: column; }
+
+header { display: flex; align-items: center; justify-content: space-between; }
+.brand { display: flex; align-items: center; gap: 14px; }
+.brand img { height: 52px; }
+.brand span { font-size: 30px; font-weight: 800; letter-spacing: -0.5px; }
+.badge { font-size: 15px; font-weight: 700; letter-spacing: 2.5px; text-transform: uppercase;
+  padding: 9px 16px; border-radius: 999px; color: #e9d5ff;
+  background: rgba(139, 92, 246, 0.18); border: 1px solid rgba(167, 139, 250, 0.45); }
+
+h1 { margin-top: 24px; font-size: 44px; line-height: 1.1; font-weight: 800; letter-spacing: -1px; max-width: 980px; }
+.sub { margin-top: 8px; font-size: 19px; color: #a1a1aa; }
+
+.content { flex: 1; display: flex; align-items: center; padding: 14px 0 22px; }
+
+/* Layout 1: one column per position. */
+.cols { width: 100%; display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+.col { background: rgba(255, 255, 255, 0.045); border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 20px; padding: 22px 24px; }
+.col .pos { display: inline-block; font-size: 15px; font-weight: 800; letter-spacing: 2px; color: #c4b5fd; }
+.col .name { margin-top: 8px; font-size: 30px; font-weight: 800; letter-spacing: -0.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.col .team { font-size: 16px; color: #71717a; margin-top: 2px; }
+.col .big { margin-top: 14px; font-size: 52px; font-weight: 800; font-family: "SF Mono", Menlo, monospace; letter-spacing: -2px; }
+.col .big small { font-size: 16px; color: #a1a1aa; font-family: inherit; letter-spacing: 0; margin-left: 6px; }
+.col .meta { margin-top: 10px; display: flex; gap: 16px; font-size: 17px; color: #a1a1aa; }
+.col .meta b { color: #fff; font-weight: 700; }
+
+/* Layout 2: a ranked list. */
+.list { width: 100%; display: flex; flex-direction: column; gap: 7px; }
+.row { display: grid; grid-template-columns: 30px 56px 1fr auto auto; align-items: center; gap: 18px;
+  background: rgba(255, 255, 255, 0.045); border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px; padding: 7px 22px; }
+.row .rank { font-size: 22px; font-weight: 800; color: #71717a; font-family: "SF Mono", Menlo, monospace; }
+.row:first-child .rank { color: #fbbf24; }
+.row .chip { font-size: 14px; font-weight: 800; letter-spacing: 1.5px; text-align: center; color: #c4b5fd;
+  padding: 5px 0; border-radius: 8px; background: rgba(139, 92, 246, 0.16); }
+.row .who .name { font-size: 25px; font-weight: 800; letter-spacing: -0.3px; }
+.row .who .detail { font-size: 15px; color: #a1a1aa; margin-top: 1px; }
+.row .side { font-size: 16px; color: #a1a1aa; text-align: right; white-space: nowrap; }
+.row .side b { color: #fff; }
+.row .big { font-size: 34px; font-weight: 800; font-family: "SF Mono", Menlo, monospace; min-width: 110px; text-align: right; }
+.row .big.up { color: #34d399; } .row .big.down { color: #f87171; }
+.row .big small { display: block; font-size: 12px; color: #71717a; font-family: Inter, sans-serif; letter-spacing: 1px; margin-top: -2px; }
+.tag { display: inline-block; margin-left: 8px; font-size: 13px; font-weight: 800; padding: 2px 8px; border-radius: 6px;
+  vertical-align: 4px; letter-spacing: 1px; }
+.tag.c { background: #facc15; color: #111; } .tag.out { background: rgba(248, 113, 113, 0.2); color: #fca5a5; }
+.tag.gtd { background: rgba(251, 191, 36, 0.18); color: #fcd34d; }
+
+footer { display: flex; align-items: center; justify-content: space-between; height: 58px; margin: 0 -56px; padding: 0 56px;
+  background: linear-gradient(90deg, rgba(139, 92, 246, 0.32), rgba(139, 92, 246, 0.08));
+  border-top: 1px solid rgba(167, 139, 250, 0.35); font-size: 19px; }
+footer .url { font-weight: 800; letter-spacing: 0.2px; }
+footer .pitch { color: #ddd6fe; }
