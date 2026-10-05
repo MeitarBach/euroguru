@@ -12,11 +12,12 @@ import { PlayerDetailProvider } from './hooks/usePlayerDetail';
 import { AuthProvider } from './hooks/useAuth';
 
 function App() {
-  const [activeTab, setActiveTab] = useState('dashboard');
+  // An invite link (?join=) is about the Live tab, so it opens there.
+  const [activeTab, setActiveTab] = useState(() => (new URLSearchParams(window.location.search).has('join') ? 'live' : 'dashboard'));
   // Live is the one view that stays mounted once opened: it polls the games, and its
   // feed and sparklines are built up over the evening, so leaving it for the stats
   // table and coming back should not start it over.
-  const [liveMounted, setLiveMounted] = useState(false);
+  const [liveMounted, setLiveMounted] = useState(() => new URLSearchParams(window.location.search).has('join'));
   const selectTab = (tab) => {
     if (tab === 'live') setLiveMounted(true);
     setActiveTab(tab);

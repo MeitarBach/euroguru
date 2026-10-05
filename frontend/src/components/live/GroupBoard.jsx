@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Plus, Pencil, Trash2, Check, X } from 'lucide-react';
+import { Plus, Pencil, Trash2, Check, X, Share2 } from 'lucide-react';
 import AnimatedNumber from './AnimatedNumber';
 import LiveDot from './LiveDot';
 import { decimalsFor } from '../../lib/live/format';
@@ -124,7 +124,7 @@ export function GroupBoard({ round, groups, selectedId, onSelect, onCreate }) {
 }
 
 /** The open group's name, with renaming and (two-step) deleting. */
-export function GroupHeader({ group, canDelete, onRename, onDelete }) {
+export function GroupHeader({ group, canDelete, onRename, onDelete, onShare }) {
     const [editing, setEditing] = useState(false);
     const [confirming, setConfirming] = useState(false);
 
@@ -157,6 +157,17 @@ export function GroupHeader({ group, canDelete, onRename, onDelete }) {
                     <Pencil size={13} />
                 </button>
             </div>
+            <div className="flex items-center gap-1 shrink-0">
+            {onShare && !confirming && group.rows.length > 0 && (
+                <button
+                    type="button"
+                    onClick={onShare}
+                    title="Share an image of this group and an invite link"
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium text-purple-200 bg-purple-500/15 border border-purple-500/30 hover:bg-purple-500/25"
+                >
+                    <Share2 size={13} /> Share
+                </button>
+            )}
             {canDelete && (confirming ? (
                 <span className="flex items-center gap-1.5 shrink-0 text-xs">
                     <span className="text-gray-400">Delete {group.name}?</span>
@@ -181,6 +192,7 @@ export function GroupHeader({ group, canDelete, onRename, onDelete }) {
                     <Trash2 size={14} />
                 </button>
             ))}
+            </div>
         </div>
     );
 }
