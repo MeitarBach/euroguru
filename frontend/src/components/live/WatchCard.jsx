@@ -45,38 +45,45 @@ function Stat({ value, label, tone = 'text-gray-300', dim = !value }) {
     );
 }
 
-// Foul trouble: four is a warning, five is out of the game.
-const foulTone = (pf) => (pf >= 5 ? 'text-red-400' : pf >= 4 ? 'text-amber-300' : 'text-gray-300');
+// What gains points reads green, what costs them orange; foul trouble goes amber at
+// four and red at five, when the player is out of the game.
+const GOOD = 'text-emerald-300/90';
+const BAD = 'text-orange-300/90';
+const foulTone = (pf) => (pf >= 5 ? 'text-red-400' : pf >= 4 ? 'text-amber-300' : BAD);
 
 /**
- * Every stat the fantasy score is made of, on two lines: minutes, points and the three
- * shooting splits made/attempted, then the rest of the box. Each one either adds to PIR
- * or takes from it, so the number on the card can always be read off the line.
+ * Every stat the fantasy score is made of, in three rows: what gains points, the
+ * shooting as made/attempted (with minutes), and what costs points. PIR is the first
+ * row's sum less the third's, so the number on the card can always be read off it.
  */
 function StatLine({ line }) {
     const dot = <span className="text-gray-700">·</span>;
+    const missed = (line.fga2 - line.fgm2) + (line.fga3 - line.fgm3) + (line.fta - line.ftm);
+    const row = 'flex flex-wrap items-center gap-x-1.5';
     return (
         <div className="min-w-0 text-[11px] leading-[1.35] text-gray-500 space-y-px">
-            <div className="flex flex-wrap items-center gap-x-1.5">
-                <span className="font-mono tabular-nums text-gray-400">{line.min}</span>{dot}
-                <Stat value={line.pts} label="PTS" tone="text-gray-200" />{dot}
-                <Stat value={`${line.fgm2}/${line.fga2}`} label="2P" dim={!line.fga2} />{dot}
-                <Stat value={`${line.fgm3}/${line.fga3}`} label="3P" dim={!line.fga3} />{dot}
-                <Stat value={`${line.ftm}/${line.fta}`} label="FT" dim={!line.fta} />
-            </div>
-            <div className="flex flex-wrap items-center gap-x-1.5">
-                <span className={line.reb ? 'text-gray-300' : 'text-gray-600'}>
+            <div className={row}>
+                <Stat value={line.pts} label="PTS" tone={GOOD} />{dot}
+                <span className={line.reb ? GOOD : 'text-gray-600'}>
                     REB <span className="font-mono tabular-nums">{line.reb}</span>
                     {line.oreb > 0 && <span className="text-gray-500"> ({line.oreb} OR)</span>}
                 </span>{dot}
-                <Stat value={line.ast} label="AST" />{dot}
-                <Stat value={line.stl} label="STL" />{dot}
-                <Stat value={line.blk} label="BLK" />{dot}
-                <Stat value={line.tov} label="TO" tone="text-orange-300/90" />{dot}
+                <Stat value={line.ast} label="AST" tone={GOOD} />{dot}
+                <Stat value={line.stl} label="STL" tone={GOOD} />{dot}
+                <Stat value={line.blk} label="BLK" tone={GOOD} />{dot}
+                <Stat value={line.fd} label="FD" tone={GOOD} />
+            </div>
+            <div className={row}>
+                <Stat value={`${line.fgm2}/${line.fga2}`} label="2P" dim={!line.fga2} />{dot}
+                <Stat value={`${line.fgm3}/${line.fga3}`} label="3P" dim={!line.fga3} />{dot}
+                <Stat value={`${line.ftm}/${line.fta}`} label="FT" dim={!line.fta} />{dot}
+                <Stat value={line.min} label="MIN" tone="text-gray-400" />
+            </div>
+            <div className={row}>
+                <Stat value={missed} label="MISS" tone={BAD} />{dot}
+                <Stat value={line.tov} label="TO" tone={BAD} />{dot}
                 <Stat value={line.pf} label="PF" tone={foulTone(line.pf)} />{dot}
-                <Stat value={line.fd} label="FD" />{dot}
-                <Stat value={line.blka} label="BLKA" tone="text-orange-300/90" />{dot}
-                <Stat value={line.pir} label="PIR" tone={line.pir < 0 ? 'text-red-300' : 'text-gray-200'} />
+                <Stat value={line.blka} label="BLKA" tone={BAD} />
                 {line.pf >= 5 && <span className="text-red-400">(fouled out)</span>}
             </div>
         </div>
