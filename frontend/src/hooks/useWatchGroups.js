@@ -135,7 +135,8 @@ export default function useWatchGroups() {
 
     // `keys` seeds the group - a player picked in the game view goes straight in, subject
     // to the same free limit as any other add.
-    const create = useCallback((name, keys = []) => {
+    // `roles` ({ bench, captain }) comes with a group imported from an invite link.
+    const create = useCallback((name, keys = [], roles = {}) => {
         const used = new Set(groups.map(g => g.color));
         const color = GROUP_COLORS.findIndex((_, i) => !used.has(i));
         const fresh = keys.filter(k => !allKeys.includes(k));
@@ -149,6 +150,8 @@ export default function useWatchGroups() {
             bench: [],
             captain: null,
         };
+        group.bench = (roles.bench ?? []).filter(k => group.keys.includes(k));
+        group.captain = group.keys.includes(roles.captain) && !group.bench.includes(roles.captain) ? roles.captain : null;
         save([...groups, group]);
         select(group.id);
         return group.id;

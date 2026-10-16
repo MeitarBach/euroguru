@@ -20,6 +20,7 @@ import ActivityFeed from './live/ActivityFeed';
 import LivePicker from './live/LivePicker';
 import GameSection from './live/GameSection';
 import { boxscoreName } from '../lib/live/rows';
+import { shareGroup, readInvite, clearInvite } from '../lib/live/share';
 import LiveDot from './live/LiveDot';
 
 const SEASON_CODE = `E${CURRENT_SEASON}`;
@@ -135,6 +136,14 @@ export default function LiveView() {
     const [picker, setPicker] = useState({ open: false, game: null });
     // The game open in the game view, by code - its boxscore is polled while it is.
     const [openGame, setOpenGame] = useState(null);
+    // A group someone shared with an invite link (?join=), offered until accepted or dismissed.
+    const [invite, setInvite] = useState(() => readInvite());
+    const [toast, setToast] = useState(null);
+    const flash = useCallback((message) => {
+        if (!message) return;
+        setToast(message);
+        setTimeout(() => setToast(t => (t === message ? null : t)), 3500);
+    }, []);
     const [sound, setSound] = useState(loadSound);
     const now = useNow(1000);
     const watch = useWatchGroups();
@@ -323,6 +332,36 @@ export default function LiveView() {
                         onOpen={(g) => setOpenGame(code => (code === g.code ? null : g.code))}
                     />
 
+                    {invite && (
+                        <div className="flex flex-col sm:flex-row sm:items-center gap-3 px-4 py-3 rounded-xl bg-purple-500/10 border border-purple-500/30 text-sm">
+                            <span className="flex-1 text-gray-200">
+                                Someone shared <b className="text-white">{invite.name}</b> with you ({invite.keys.length} players). Follow it live?
+                            </span>
+                            <span className="flex gap-2 shrink-0">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        watch.create(invite.name, invite.keys, { bench: invite.bench, captain: invite.captain });
+                                        setOpenGame(null);
+                                        setInvite(null);
+                                        clearInvite();
+                                        flash(`${invite.name} added to your groups`);
+                                    }}
+                                    className="px-3 py-1.5 rounded-lg text-xs font-medium text-white bg-purple-600 hover:bg-purple-500"
+                                >
+                                    Add group
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => { setInvite(null); clearInvite(); }}
+                                    className="px-3 py-1.5 rounded-lg text-xs text-gray-400 hover:text-white"
+                                >
+                                    No thanks
+                                </button>
+                            </span>
+                        </div>
+                    )}
+
                     <div className="grid grid-cols-1 xl:grid-cols-3 gap-5 items-start">
                         {/* On a phone the scoreboard leads; on a wide screen it moves to the side. */}
                         <div className="xl:hidden">{board}</div>
@@ -348,6 +387,7 @@ export default function LiveView() {
                                 group={group}
                                 canDelete={groups.length > 1}
                                 onRename={(name) => watch.rename(group.id, name)}
+                                onShare={() => shareGroup(group, live.round).then(flash)}
                                 onDelete={() => watch.destroy(group.id)}
                             />
                             {group.rows.length === 0 ? (
@@ -407,6 +447,12 @@ export default function LiveView() {
                         </aside>
                     </div>
                 </>
+            )}
+
+            {toast && (
+                <div className="fixed bottom-24 md:bottom-8 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-xl bg-[#1a1a20] border border-white/10 text-sm text-white shadow-2xl">
+                    {toast}
+                </div>
             )}
 
             {picker.open && roster && (

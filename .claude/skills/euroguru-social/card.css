@@ -1,0 +1,85 @@
+/* EuroGuru social card: 1200x675, the in-feed size for X/Twitter. The look follows the
+   app - near-black, purple glow, compact data - so a post reads as a piece of it. */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 1200px; height: 675px; overflow: hidden; }
+body {
+  font-family: Inter, -apple-system, "SF Pro Display", "Helvetica Neue", Arial, sans-serif;
+  color: #fff;
+  background: #050507;
+  position: relative;
+}
+
+/* Background: two soft glows and a faint half-court, so the card is recognisably ours
+   even as a thumbnail. */
+.bg { position: absolute; inset: 0; overflow: hidden; }
+.glow { position: absolute; border-radius: 50%; filter: blur(90px); }
+.glow.a { width: 620px; height: 620px; left: -160px; top: -220px; background: rgba(139, 92, 246, 0.42); }
+.glow.b { width: 520px; height: 520px; right: -140px; bottom: -260px; background: rgba(236, 72, 153, 0.22); }
+.court { position: absolute; right: -120px; top: 50%; width: 760px; height: 760px; transform: translateY(-50%);
+  border: 2px solid rgba(255, 255, 255, 0.045); border-radius: 50%; }
+.court::before { content: ""; position: absolute; inset: 190px; border: 2px solid rgba(255, 255, 255, 0.045); border-radius: 50%; }
+.court::after { content: ""; position: absolute; left: 50%; top: -40px; bottom: -40px; border-left: 2px solid rgba(255, 255, 255, 0.04); }
+.mascot { position: absolute; right: 26px; bottom: 58px; height: 300px; opacity: 0.11; }
+
+.wrap { position: relative; height: 100%; padding: 40px 56px 0; display: flex; flex-direction: column; }
+
+header { display: flex; align-items: center; justify-content: space-between; }
+.brand { display: flex; align-items: center; gap: 14px; }
+.brand img { height: 52px; }
+.brand span { font-size: 30px; font-weight: 800; letter-spacing: -0.5px; }
+.badge { font-size: 15px; font-weight: 700; letter-spacing: 2.5px; text-transform: uppercase;
+  padding: 9px 16px; border-radius: 999px; color: #e9d5ff;
+  background: rgba(139, 92, 246, 0.18); border: 1px solid rgba(167, 139, 250, 0.45); }
+
+h1 { margin-top: 24px; font-size: 44px; line-height: 1.1; font-weight: 800; letter-spacing: -1px; max-width: 980px; }
+.sub { margin-top: 8px; font-size: 19px; color: #a1a1aa; }
+
+.content { flex: 1; display: flex; align-items: center; padding: 14px 0 22px; }
+
+/* Player cards: each player's headshot over a purple halo, the stat top right, the
+   details at the bottom. Up to 3 to an image; .compact fits a lineup of 5. */
+/* The cards take the height left under the title, so a two-line title never pushes them
+   into the footer. */
+.pcards { width: 100%; align-self: stretch; display: grid; gap: 20px; }
+.pcard { position: relative; overflow: hidden; border-radius: 20px;
+  background: rgba(255, 255, 255, 0.045); border: 1px solid rgba(255, 255, 255, 0.08); }
+.pcard .halo { position: absolute; left: 50%; top: 18px; width: 230px; height: 230px; transform: translateX(-50%);
+  border-radius: 50%; background: radial-gradient(circle, rgba(139, 92, 246, 0.55), rgba(139, 92, 246, 0) 70%); }
+.pcard .shot { position: absolute; left: 50%; top: 6px; height: 300px; transform: translateX(-50%);
+  -webkit-mask-image: linear-gradient(to bottom, #000 52%, transparent 70%); }
+.pcard .initials { position: absolute; left: 50%; top: 56px; width: 150px; height: 150px; transform: translateX(-50%);
+  display: flex; align-items: center; justify-content: center; border-radius: 50%; font-size: 54px; font-weight: 800;
+  color: #ddd6fe; background: rgba(139, 92, 246, 0.25); border: 2px solid rgba(167, 139, 250, 0.45); }
+.pcard .chip { position: absolute; top: 18px; left: 18px; font-size: 14px; font-weight: 800; letter-spacing: 1.5px;
+  color: #c4b5fd; background: rgba(139, 92, 246, 0.22); border-radius: 8px; padding: 5px 10px; }
+.pcard .stat { position: absolute; top: 16px; right: 18px; text-align: right; }
+.pcard .stat b { display: block; font-size: 40px; font-weight: 800; letter-spacing: -1.5px;
+  font-family: "SF Mono", Menlo, monospace; text-shadow: 0 2px 12px rgba(0, 0, 0, 0.6); }
+.pcard .stat small { font-size: 12px; letter-spacing: 1px; color: #a1a1aa; text-transform: uppercase; }
+.pcard .stat.up b { color: #34d399; } .pcard .stat.down b { color: #f87171; }
+.pcard .info { position: absolute; left: 0; right: 0; bottom: 0; padding: 0 22px 20px; }
+.pcard .name { font-size: 30px; font-weight: 800; letter-spacing: -0.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pcard .line { margin-top: 2px; font-size: 17px; color: #e4e4e7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pcard .meta { margin-top: 10px; padding-top: 10px; display: flex; justify-content: space-between; gap: 12px;
+  font-size: 15px; color: #a1a1aa; white-space: nowrap; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.pcard .meta b { color: #fff; }
+.pcards.compact { gap: 14px; }
+.pcards.compact .halo { width: 180px; height: 180px; }
+.pcards.compact .shot { top: 12px; height: 290px;
+  -webkit-mask-image: linear-gradient(to bottom, #000 60%, transparent 80%); }
+.pcards.compact .initials { width: 120px; height: 120px; font-size: 42px; }
+.pcards.compact .info { padding: 0 16px 16px; }
+.pcards.compact .name { font-size: 21px; }
+.pcards.compact .line { font-size: 14px; color: #a1a1aa; }
+.pcards.compact .stat { position: static; margin-top: 8px; text-align: left; display: flex; align-items: baseline; gap: 8px; }
+.pcards.compact .stat b { display: inline; font-size: 32px; }
+.tag { display: inline-block; margin-left: 8px; font-size: 13px; font-weight: 800; padding: 2px 8px; border-radius: 6px;
+  vertical-align: 4px; letter-spacing: 1px; }
+.tag.c { background: #facc15; color: #111; } .tag.out { background: rgba(248, 113, 113, 0.2); color: #fca5a5; }
+.tag.gtd { background: rgba(251, 191, 36, 0.18); color: #fcd34d; }
+
+footer { display: flex; align-items: center; justify-content: space-between; height: 58px; margin: 0 -56px; padding: 0 56px;
+  background: linear-gradient(90deg, rgba(139, 92, 246, 0.32), rgba(139, 92, 246, 0.08));
+  border-top: 1px solid rgba(167, 139, 250, 0.35); font-size: 19px; }
+footer .url { font-weight: 800; letter-spacing: 0.2px; }
+footer .pitch { color: #ddd6fe; }

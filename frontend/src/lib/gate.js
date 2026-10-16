@@ -10,6 +10,8 @@ export const PREVIEW_ROWS = {
     stats: 10,
     recs: 3,
     gameLog: 3,
+    matchups: 6,
+    boost: 3,
 };
 
 // Players a signed-out visitor can follow on the Live tab at once.
