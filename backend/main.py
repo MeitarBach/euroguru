@@ -10,6 +10,7 @@ from utils.data_processing import load_and_merge_data, filter_by_cr_and_position
 from utils.recommendations import recommend_players_v2
 from utils.cr_history import cr_history_payload
 from utils.defense_vs_position import defense_vs_position_payload
+from utils.coaches import coaches_payload
 from utils.auth import optional_user
 
 app = FastAPI(title="EuroGuru API")
@@ -344,6 +345,22 @@ def get_defense_vs_position(
     if payload is None:
         raise HTTPException(status_code=400, detail=f"Round {round_number} cannot be shown for {season}")
     return payload
+
+
+@app.get("/api/coaches")
+def get_coaches(season: str = DEFAULT_SEASON):
+    """
+    The season's head coaches - name, club and price - for the Live tab's coach slot.
+
+    Scoring needs nothing more: a coach is worth their club's result, which the
+    browser reads from the live game feed. See utils/coaches.py.
+    """
+    if season not in DATA_FILES:
+        raise HTTPException(status_code=404, detail="Season not found")
+    try:
+        return coaches_payload(season)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Coaches are not built for this season yet")
 
 
 class RecommendationParams(BaseModel):

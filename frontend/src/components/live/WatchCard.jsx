@@ -16,7 +16,7 @@ const GLOW_MS = 2500;
 const BIG_PLAY = 3;
 
 /** Where the player's game is: "Q3 04:12", "Final W 81–80", "19:00 · in 2h". */
-function GameNote({ row, now }) {
+export function GameNote({ row, now }) {
     const { state, game } = row;
     if (['live', 'idle', 'waiting'].includes(state)) {
         return <span className="text-red-300">{[game.period, game.clock].filter(Boolean).join(' ') || 'Live'}</span>;
@@ -36,24 +36,56 @@ function GameNote({ row, now }) {
     return <span>No game this round</span>;
 }
 
-/** The counting stats that are not zero, then minutes and (when they matter) fouls. */
-function StatLine({ line }) {
-    const parts = [['pts', 'PTS'], ['reb', 'REB'], ['ast', 'AST'], ['stl', 'STL'], ['blk', 'BLK'], ['tov', 'TO']]
-        .filter(([stat]) => line[stat])
-        .map(([stat, label]) => (
-            <span key={stat} className={stat === 'tov' ? 'text-orange-300/90' : 'text-gray-300'}>
-                <span className="font-mono tabular-nums">{line[stat]}</span> {label}
-            </span>
-        ));
+/** One stat in a stat line; a zero is dimmed rather than dropped, so lines stay comparable. */
+function Stat({ value, label, tone = 'text-gray-300', dim = !value }) {
     return (
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-gray-500 min-w-0">
-            {parts.length ? parts : <span>0 PTS</span>}
-            <span>· <span className="font-mono tabular-nums">{line.min}</span></span>
-            {line.pf >= 3 && (
-                <span className={line.pf >= 5 ? 'text-red-400' : line.pf >= 4 ? 'text-amber-300' : ''}>
-                    · {line.pf} PF{line.pf >= 5 ? ' (out)' : ''}
-                </span>
-            )}
+        <span className={dim ? 'text-gray-600' : tone}>
+            {label && <>{label} </>}<span className="font-mono tabular-nums">{value}</span>
+        </span>
+    );
+}
+
+// What gains points reads green, what costs them orange; foul trouble goes amber at
+// four and red at five, when the player is out of the game.
+const GOOD = 'text-emerald-300/90';
+const BAD = 'text-orange-300/90';
+const foulTone = (pf) => (pf >= 5 ? 'text-red-400' : pf >= 4 ? 'text-amber-300' : BAD);
+
+/**
+ * Every stat the fantasy score is made of, in three rows: what gains points, the
+ * shooting as made/attempted (with minutes), and what costs points. PIR is the first
+ * row's sum less the third's, so the number on the card can always be read off it.
+ */
+function StatLine({ line }) {
+    const dot = <span className="text-gray-700">·</span>;
+    const missed = (line.fga2 - line.fgm2) + (line.fga3 - line.fgm3) + (line.fta - line.ftm);
+    const row = 'flex flex-wrap items-center gap-x-1.5';
+    return (
+        <div className="min-w-0 text-[11px] leading-[1.35] text-gray-500 space-y-px">
+            <div className={row}>
+                <Stat value={line.pts} label="PTS" tone={GOOD} />{dot}
+                <span className={line.reb ? GOOD : 'text-gray-600'}>
+                    REB <span className="font-mono tabular-nums">{line.reb}</span>
+                    {line.oreb > 0 && <span className="text-gray-500"> ({line.oreb} OR)</span>}
+                </span>{dot}
+                <Stat value={line.ast} label="AST" tone={GOOD} />{dot}
+                <Stat value={line.stl} label="STL" tone={GOOD} />{dot}
+                <Stat value={line.blk} label="BLK" tone={GOOD} />{dot}
+                <Stat value={line.fd} label="FD" tone={GOOD} />
+            </div>
+            <div className={row}>
+                <Stat value={`${line.fgm2}/${line.fga2}`} label="2P" dim={!line.fga2} />{dot}
+                <Stat value={`${line.fgm3}/${line.fga3}`} label="3P" dim={!line.fga3} />{dot}
+                <Stat value={`${line.ftm}/${line.fta}`} label="FT" dim={!line.fta} />{dot}
+                <Stat value={line.min} label="MIN" tone="text-gray-400" />
+            </div>
+            <div className={row}>
+                <Stat value={missed} label="MISS" tone={BAD} />{dot}
+                <Stat value={line.tov} label="TO" tone={BAD} />{dot}
+                <Stat value={line.pf} label="PF" tone={foulTone(line.pf)} />{dot}
+                <Stat value={line.blka} label="BLKA" tone={BAD} />
+                {line.pf >= 5 && <span className="text-red-400">(fouled out)</span>}
+            </div>
         </div>
     );
 }
@@ -222,29 +254,31 @@ export default function WatchCard({
             </div>
 
             {line && !line.dnp ? (
-                <div className="mt-1.5 flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                        {onToggleBench && (
-                            <RoleControls
-                                benched={benched}
-                                captain={captain}
-                                onToggleBench={onToggleBench}
-                                onToggleCaptain={onToggleCaptain}
-                            />
-                        )}
-                        <StatLine line={line} />
-                    </div>
-                    {points.length > 2 && (
-                        <span className="shrink-0">
-                            <Sparkline
-                                values={points}
-                                change={points[points.length - 1] - points[0]}
-                                width={56}
-                                height={16}
-                                title="FPT through the game"
-                            />
-                        </span>
+                <div className="mt-1.5 space-y-1">
+                    {(onToggleBench || points.length > 2) && (
+                        <div className="flex items-center justify-between gap-2">
+                            {onToggleBench ? (
+                                <RoleControls
+                                    benched={benched}
+                                    captain={captain}
+                                    onToggleBench={onToggleBench}
+                                    onToggleCaptain={onToggleCaptain}
+                                />
+                            ) : <span />}
+                            {points.length > 2 && (
+                                <span className="shrink-0">
+                                    <Sparkline
+                                        values={points}
+                                        change={points[points.length - 1] - points[0]}
+                                        width={56}
+                                        height={16}
+                                        title="FPT through the game"
+                                    />
+                                </span>
+                            )}
+                        </div>
                     )}
+                    <StatLine line={line} />
                 </div>
             ) : (
                 <div className="mt-1.5 flex items-center gap-2 text-[11px] text-gray-600">

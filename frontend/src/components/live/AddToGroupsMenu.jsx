@@ -2,13 +2,20 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Check, Plus, UserRound } from 'lucide-react';
 
 /**
- * Put a player in any of your groups, from a card in the game view.
+ * Put a player - or a head coach - in any of your groups, from the game view.
  *
  * One tap per group toggles membership (the free limit is enforced by the toggle), a new
- * group can be made on the spot, and the player's detail is one more tap away. Closes on
- * a click elsewhere or Escape.
+ * group can be made on the spot, and the player's detail is one more tap away. `isIn`
+ * says whether a group already has them: a player is in its keys, a coach is its coach.
+ * Closes on a click elsewhere or Escape.
+ *
+ * Placed under its anchor by default; `style` positions it from outside instead, which
+ * the box score needs - a menu inside a scrolling table would be clipped by it.
  */
-export default function AddToGroupsMenu({ player, groups, onToggle, onCreate, onDetails, onClose }) {
+export default function AddToGroupsMenu({
+    who, groups, isIn, onToggle, onCreate, onDetails, onClose,
+    className = 'left-2 right-2 top-full mt-1', style,
+}) {
     const ref = useRef(null);
     const [naming, setNaming] = useState(false);
     const [name, setName] = useState('');
@@ -30,16 +37,17 @@ export default function AddToGroupsMenu({ player, groups, onToggle, onCreate, on
         <div
             ref={ref}
             onClick={(e) => e.stopPropagation()}
-            className="absolute left-2 right-2 top-full mt-1 z-40 rounded-xl border border-white/10 bg-[#141418] shadow-2xl p-1.5 text-sm"
+            style={style}
+            className={`absolute z-40 rounded-xl border border-white/10 bg-[#141418] shadow-2xl p-1.5 text-sm ${className}`}
         >
-            <div className="px-2 pt-1 pb-1.5 text-[11px] text-gray-500">Add {player.PlayerName} to</div>
+            <div className="px-2 pt-1 pb-1.5 text-[11px] text-gray-500">Add {who} to</div>
             {groups.map(g => {
-                const on = g.keys.includes(player.PlayerKey);
+                const on = isIn(g);
                 return (
                     <button
                         key={g.id}
                         type="button"
-                        onClick={() => onToggle(g.id, player.PlayerKey)}
+                        onClick={() => onToggle(g.id)}
                         aria-pressed={on}
                         className="w-full flex items-center gap-2.5 px-2 py-2 rounded-lg text-left hover:bg-white/[0.06]"
                     >
@@ -75,14 +83,18 @@ export default function AddToGroupsMenu({ player, groups, onToggle, onCreate, on
                     <Plus size={14} /> New group…
                 </button>
             )}
-            <div className="my-1 border-t border-white/5" />
-            <button
-                type="button"
-                onClick={onDetails}
-                className="w-full flex items-center gap-2.5 px-2 py-2 rounded-lg text-left text-gray-400 hover:bg-white/[0.06]"
-            >
-                <UserRound size={14} /> Player details
-            </button>
+            {onDetails && (
+                <>
+                    <div className="my-1 border-t border-white/5" />
+                    <button
+                        type="button"
+                        onClick={onDetails}
+                        className="w-full flex items-center gap-2.5 px-2 py-2 rounded-lg text-left text-gray-400 hover:bg-white/[0.06]"
+                    >
+                        <UserRound size={14} /> Player details
+                    </button>
+                </>
+            )}
         </div>
     );
 }

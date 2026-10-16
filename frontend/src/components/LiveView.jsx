@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Radio, UserPlus, Volume2, VolumeX, FlaskConical, Plus, RefreshCw } from 'lucide-react';
-import { fetchStats } from '../services/api';
+import { fetchStats, fetchCoaches } from '../services/api';
 import { CURRENT_SEASON } from '../seasons';
 import useWatchGroups, { GROUP_COLORS } from '../hooks/useWatchGroups';
 import useLiveRound from '../hooks/useLiveRound';
@@ -8,7 +8,7 @@ import useNow from '../hooks/useNow';
 import { useOpenPlayer } from '../hooks/playerDetailContext';
 import { euroleagueSource } from '../lib/live/source';
 import { demoSource } from '../lib/live/demo';
-import { watchRow, inGroup, sortRows, totals } from '../lib/live/rows';
+import { watchRow, inGroup, sortRows, totals, coachRow, coachKey } from '../lib/live/rows';
 import { countdown, ago, decimalsFor } from '../lib/live/format';
 import { LayoutGroup } from 'framer-motion';
 import { chime, enableChime } from '../lib/live/chime';
@@ -19,6 +19,8 @@ import { GroupBoard, GroupHeader } from './live/GroupBoard';
 import ActivityFeed from './live/ActivityFeed';
 import LivePicker from './live/LivePicker';
 import GameSection from './live/GameSection';
+import CoachCard from './live/CoachCard';
+import CoachPicker from './live/CoachPicker';
 import { boxscoreName } from '../lib/live/rows';
 import { shareGroup, readInvite, clearInvite } from '../lib/live/share';
 import LiveDot from './live/LiveDot';
@@ -123,6 +125,62 @@ function EmptyState({ group, suggestions, onAdd, onPick }) {
 }
 
 /**
+ * The group's head coach: their card, or a way to pick one. A coach is worth their
+ * club's margin, so they count from the first basket of their game.
+ */
+function CoachSlot({ group, coaches, games, history, lastEvent, now, picking, onTogglePicker, onClosePicker, onPick }) {
+    const coach = group.coachRow;
+    if (!coach && !coaches.length) return null;
+    return (
+        <div className="relative space-y-2">
+            <div className="flex items-baseline justify-between px-1 text-[11px] uppercase tracking-wider text-gray-500 font-semibold">
+                <span>
+                    Coach
+                    <span className="normal-case tracking-normal font-normal text-gray-600"> · scores the club's margin</span>
+                </span>
+                <span className="flex items-baseline gap-3 normal-case tracking-normal">
+                    {coach && (
+                        <button type="button" onClick={onTogglePicker} className="font-normal text-purple-300 hover:text-purple-200">
+                            Change
+                        </button>
+                    )}
+                    {coach && <span className="font-mono text-gray-400">{fixedScore(coach.counted ?? 0)}</span>}
+                </span>
+            </div>
+            {coach ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-3 gap-2">
+                    <CoachCard
+                        row={coach}
+                        history={history[coach.key]}
+                        lastEvent={lastEvent.get(coach.key)}
+                        now={now}
+                        onRemove={() => onPick(coach.key)}
+                    />
+                </div>
+            ) : (
+                <button
+                    type="button"
+                    onClick={onTogglePicker}
+                    className="inline-flex items-center gap-2 px-3 py-2.5 rounded-xl border border-dashed border-white/10 text-sm text-gray-400 hover:text-white hover:border-purple-500/40"
+                >
+                    <Plus size={14} /> Add a coach
+                </button>
+            )}
+            {picking && (
+                <CoachPicker
+                    coaches={coaches}
+                    games={games}
+                    selectedKey={coach?.key ?? null}
+                    now={now}
+                    onPick={(key) => { onPick(key); onClosePicker(); }}
+                    onClose={onClosePicker}
+                />
+            )}
+        </div>
+    );
+}
+
+/**
  * Live fantasy points for the players you choose, while their games are on.
  *
  * The browser reads Euroleague's live feed directly (see lib/live/feed.js) and scores it
@@ -133,6 +191,8 @@ export default function LiveView() {
     const demo = useMemo(() => new URLSearchParams(window.location.search).has('demo'), []);
     const [source] = useState(() => (demo ? demoSource(SEASON_CODE) : euroleagueSource(SEASON_CODE)));
     const [roster, setRoster] = useState(null);
+    const [coaches, setCoaches] = useState([]);
+    const [coachPicker, setCoachPicker] = useState(false);
     const [picker, setPicker] = useState({ open: false, game: null });
     // The game open in the game view, by code - its boxscore is polled while it is.
     const [openGame, setOpenGame] = useState(null);
@@ -152,8 +212,15 @@ export default function LiveView() {
     useEffect(() => {
         let alive = true;
         fetchStats(ROSTER_QUERY).then(rows => { if (alive) setRoster(rows ?? []); });
+        fetchCoaches(CURRENT_SEASON).then(rows => { if (alive) setCoaches(Array.isArray(rows) ? rows : []); });
         return () => { alive = false; };
     }, []);
+    const coachByKey = useMemo(() => new Map(coaches.map(c => [coachKey(c), c])), [coaches]);
+    // Every coach some group has, for the live loop to follow by score.
+    const watchCoaches = useMemo(() => [...new Set(watch.groups.map(g => g.coach).filter(Boolean))]
+        .map(key => coachByKey.get(key))
+        .filter(Boolean)
+        .map(c => ({ key: coachKey(c), code: c.TeamCode, name: c.CoachName })), [watch.groups, coachByKey]);
 
     // A big play chimes - when the viewer has turned sound on.
     const soundOn = useRef(sound);
@@ -187,6 +254,7 @@ export default function LiveView() {
         seasonCode: demo ? `${SEASON_CODE}-demo` : SEASON_CODE,
         roster,
         watchKeys: watch.allKeys,
+        watchCoaches,
         onEvents,
         focusCode: openGame,
     });
@@ -206,10 +274,14 @@ export default function LiveView() {
         const roleOf = (key) => (g.captain === key ? 'captain' : bench.has(key) ? 'bench' : 'starter');
         const sorted = sortRows(g.keys.map(k => rowByKey.get(k)).filter(Boolean).map(r => inGroup(r, roleOf(r.key))));
         const rows = [...sorted.filter(r => r.captain), ...sorted.filter(r => !r.captain)];
-        return { ...g, colorHex: GROUP_COLORS[g.color % GROUP_COLORS.length], rows, sums: totals(rows) };
-    }), [watch.groups, rowByKey]);
+        const coach = coachByKey.get(g.coach);
+        const coachLine = coach ? inGroup(coachRow(coach, live.games)) : null;
+        return {
+            ...g, colorHex: GROUP_COLORS[g.color % GROUP_COLORS.length], rows, coachRow: coachLine, sums: totals(rows, coachLine),
+        };
+    }), [watch.groups, rowByKey, coachByKey, live.games]);
     const group = groups.find(g => g.id === watch.selected.id) ?? groups[0];
-    const groupsOf = useCallback((key) => groups.filter(g => g.keys.includes(key)), [groups]);
+    const groupsOf = useCallback((key) => groups.filter(g => g.keys.includes(key) || g.coach === key), [groups]);
     // The open game, if any: the main column shows it in place of the group, and the
     // feed beside it follows that game rather than your players.
     const game = live.games.find(g => g.code === openGame) ?? null;
@@ -239,9 +311,11 @@ export default function LiveView() {
     }, [roster, live.games, group.keys]);
 
     const nameOf = useCallback((key, event) => rosterByKey.get(key)?.PlayerName
-        ?? (event?.name ? boxscoreName(event.name) : 'Player'), [rosterByKey]);
+        ?? coachByKey.get(key)?.CoachName
+        ?? (event?.name ? boxscoreName(event.name) : 'Player'), [rosterByKey, coachByKey]);
     const openPicker = (game = null) => setPicker({ open: true, game });
     const closePicker = useCallback(() => setPicker({ open: false, game: null }), []);
+    const closeCoachPicker = useCallback(() => setCoachPicker(false), []);
 
     const loading = live.status === 'loading' || roster === null;
 
@@ -341,7 +415,7 @@ export default function LiveView() {
                                 <button
                                     type="button"
                                     onClick={() => {
-                                        watch.create(invite.name, invite.keys, { bench: invite.bench, captain: invite.captain });
+                                        watch.create(invite.name, invite.keys, { bench: invite.bench, captain: invite.captain, coach: invite.coach });
                                         setOpenGame(null);
                                         setInvite(null);
                                         clearInvite();
@@ -371,9 +445,9 @@ export default function LiveView() {
                                 key={game.code}
                                 game={game}
                                 roster={roster}
+                                coaches={coaches}
                                 groups={groups}
                                 groupsOf={groupsOf}
-                                history={live.history}
                                 lastEventOf={(key) => lastEvent.get(key)}
                                 now={now}
                                 watch={watch}
@@ -433,6 +507,18 @@ export default function LiveView() {
                                     ))}
                                 </LayoutGroup>
                             )}
+                            <CoachSlot
+                                group={group}
+                                coaches={coaches}
+                                games={live.games}
+                                history={live.history}
+                                lastEvent={lastEvent}
+                                now={now}
+                                picking={coachPicker === group.id}
+                                onTogglePicker={() => setCoachPicker(id => (id === group.id ? false : group.id))}
+                                onClosePicker={closeCoachPicker}
+                                onPick={(key) => watch.toggleCoach(group.id, key)}
+                            />
                         </section>
                         )}
 

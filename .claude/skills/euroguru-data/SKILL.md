@@ -43,6 +43,8 @@ A PASS/WARN/FAIL table:
   teams have the bonus as games were played;
 - **dvp** - the Matchups rollup (`defense_vs_position_<season>.csv`) was rebuilt: it covers
   every stored round, and every game has both sides (a FAIL means a broken opponent join);
+- **coaches** - the CR fetch wrote `coaches_<season>.csv`: one head coach per club, each
+  mapped to a Euroleague code (the Live tab scores a coach on that club's margin);
 - **app loads** - `promote.py`'s own check that every season loads.
 
 Any FAIL → stop, explain, do not promote. Note `TOP_SCORER` / `TOP_ROUND` and the top 5.

@@ -1,5 +1,5 @@
 import { euroleagueCode } from './teams';
-import { fantasyPoints, winBonus } from './feed';
+import { fantasyPoints, winBonus, coachPoints } from './feed';
 
 /** A player's live score: PIR while the game runs, with the win bonus once it ends. */
 export function scoreOf(line, game, code) {
@@ -50,6 +50,33 @@ export function watchRow(player, games) {
     };
 }
 
+/** A coach's key in a group, beside the players' "id:<n>" PlayerKeys. */
+export const coachKey = (coach) => `coach:${coach.CoachID}`;
+
+/**
+ * A head coach as the Live tab counts them: their club's margin, scored by
+ * coachPoints() as it stands - live, not just at the final whistle - so a lead that
+ * crosses 10 moves the total. Shaped like watchRow's rows so totals() and the feed
+ * treat it the same; `player` carries the name for the places that only show one.
+ */
+export function coachRow(coach, games) {
+    const code = coach.TeamCode;
+    const game = games.find(g => g.homeCode === code || g.awayCode === code) ?? null;
+    const base = {
+        key: coachKey(coach), isCoach: true, coach,
+        player: { PlayerName: coach.CoachName, position: 'HC', CR: coach.CR, PlayerKey: null },
+        code, game, avg: null, line: null, score: null, margin: null, pending: 0, bonus: 0,
+    };
+    if (!game) return { ...base, state: 'nogame' };
+
+    const home = game.homeCode === code;
+    const mine = home ? game.scoreHome : game.scoreAway;
+    const theirs = home ? game.scoreAway : game.scoreHome;
+    const row = { ...base, home, opp: home ? game.awayCode : game.homeCode, mine, theirs };
+    if (game.status === 'scheduled') return { ...row, state: 'upcoming' };
+    return { ...row, state: game.status, margin: mine - theirs, score: coachPoints(mine - theirs) };
+}
+
 /** The boxscore's "KALAITZAKIS, PANAGIOTIS" as "P. Kalaitzakis". */
 export function boxscoreName(name) {
     const title = (s) => s.toLowerCase().replace(/\b\p{L}/gu, c => c.toUpperCase());
@@ -61,9 +88,9 @@ export function boxscoreName(name) {
  * One game as cards, per team: every priced player (as watchRow sees them) plus every
  * boxscore line the fantasy game does not price, as rows of the same shape with
  * `priced: false` and a "line:<id>" key. `missing` holds priced players who are not in
- * tonight's boxscore.
+ * tonight's boxscore, and `coach` the club's head coach, when `coaches` has them.
  */
-export function gameRows(game, roster) {
+export function gameRows(game, roster, coaches = []) {
     const matched = new Set(Object.values(game.byKey ?? {}).map(l => l.id));
     return [game.homeCode, game.awayCode].map(code => {
         const home = code === game.homeCode;
@@ -83,12 +110,14 @@ export function gameRows(game, roster) {
                 score: line.dnp ? null : scoreOf(line, game, code),
             }));
         const rows = sortRows([...priced, ...unpriced].map(r => inGroup(r, 'starter')));
+        const coach = coaches.find(c => c.TeamCode === code);
         return {
             code,
             name: home ? game.homeName : game.awayName,
             score: mine,
             rows: rows.filter(r => r.state !== 'out'),
             missing: rows.filter(r => r.state === 'out'),
+            coach: coach ? inGroup(coachRow(coach, [game])) : null,
         };
     });
 }
@@ -125,10 +154,14 @@ export function sortRows(rows) {
         || ((b.countedAvg ?? b.avg ?? 0) - (a.countedAvg ?? a.avg ?? 0)));
 }
 
-/** A group's round so far, what its win bonuses would add, and a projection for the rest. */
-export function totals(rows) {
+/**
+ * A group's round so far, what its win bonuses would add, and a projection for the rest.
+ * The coach (an inGroup'd coachRow, or null) adds to the total but not to the player
+ * counts - "3 live" is about players.
+ */
+export function totals(rows, coach = null) {
     const toPlay = rows.filter(r => ['upcoming', 'idle', 'waiting'].includes(r.state));
-    const total = rows.reduce((s, r) => s + (r.counted ?? 0), 0);
+    const total = rows.reduce((s, r) => s + (r.counted ?? 0), 0) + (coach?.counted ?? 0);
     return {
         total: round2(total),
         pending: round2(rows.reduce((s, r) => s + r.countedPending, 0)),
