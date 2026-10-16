@@ -37,8 +37,8 @@ DEV_BUCKET = os.environ.get("DEV_BUCKET_NAME", BUCKET_NAME)
 PROD_BUCKET = os.environ.get("PROD_BUCKET_NAME", "euroguru-prod")
 
 # Exactly the keys the running app reads - see data_processing._resolve_cr_key,
-# _load_first_available and _build_merged_frame, plus cr_history, defense_vs_position
-# and the schedule.
+# _load_first_available and _build_merged_frame, plus cr_history, defense_vs_position,
+# the coaches and the schedule.
 # The undated legacy player_cr_data.csv is deliberately absent, which _CR_KEY_RE is
 # written to never match. So are the dated defense_vs_position_YYYY-MM-DD.csv files
 # a retired Dunkest fetcher left in dev: the season rollup below replaced them.
@@ -48,6 +48,7 @@ PROMOTE_PATTERNS = [
     re.compile(r"^player_cr_data_\d{4}-\d{2}-\d{2}\.csv$"),
     re.compile(r"^cr_history_\d{4}\.csv$"),
     re.compile(r"^defense_vs_position_\d{4}\.csv$"),
+    re.compile(r"^coaches_\d{4}\.csv$"),
     re.compile(r"^schedule_\d{4}\.csv$"),
     re.compile(r"^injury_report\.csv$"),
 ]

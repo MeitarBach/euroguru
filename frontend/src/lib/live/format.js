@@ -39,3 +39,10 @@ export const surnameOf = (name) => String(name ?? '').replace(/\s*\([^)]*\)$/, '
 
 /** One decimal, or two when a halved bench score needs them (6.65 stays 6.65). */
 export const decimalsFor = (x) => (x !== null && x !== undefined && Math.abs(x * 10 - Math.round(x * 10)) > 1e-6 ? 2 : 1);
+
+/** A club's margin in words: "leads by 12", "trails by 3", "tied" - or "won by 12" once final. */
+export function marginText(margin, final = false) {
+    if (margin === 0) return 'tied';
+    if (final) return `${margin > 0 ? 'won' : 'lost'} by ${Math.abs(margin)}`;
+    return `${margin > 0 ? 'leads' : 'trails'} by ${Math.abs(margin)}`;
+}

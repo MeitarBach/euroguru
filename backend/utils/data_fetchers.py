@@ -9,6 +9,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 from .s3_utils import load_from_s3, save_to_s3
 from .cr_history import season_for_date
+from .coaches import save_coaches
 
 load_dotenv()
 
@@ -33,6 +34,7 @@ _MATCHDAY_OFFSETS = {}
 
 # Dunkest prices head coaches alongside players ("Head Coach" is a 4th position
 # value); the analytics only cover players, so anything outside this map is dropped.
+# The CR fetch saves the coaches to a file of their own first - see utils/coaches.py.
 POSITION_MAP = {"Guard": "G", "Forward": "F", "Center": "C"}
 
 # The round table has no minutes column, so a row with every counting stat at zero
@@ -256,9 +258,12 @@ def fetch_and_save_cr_data(competition_id=None, round_number=None):
         )
 
     raw = pd.DataFrame(rows)
+    today = datetime.today()
+    # The coaches ride along in the same rows; they get their own file before the
+    # position filter below drops them (see utils/coaches.py).
+    save_coaches(raw, season_for_date(today.date()))
     raw = raw[raw["position"].isin(POSITION_MAP)]
 
-    today = datetime.today()
     cr_df = pd.DataFrame({
         "PlayerID": raw["PlayerID"],
         "PlayerName": raw["name"].astype(str).str.strip(),

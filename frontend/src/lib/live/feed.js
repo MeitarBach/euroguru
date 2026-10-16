@@ -150,3 +150,23 @@ export const fantasyPoints = (pir, won) => round1(pir + (won ? 0.1 * Math.abs(pi
 
 /** The bonus a win would add to this PIR. */
 export const winBonus = (pir) => round1(0.1 * Math.abs(pir));
+
+/**
+ * What a head coach scores for their club's margin (their points minus the opponent's):
+ * a win by 1-10 is +10, by 11-20 +20, by more +25; a loss by 1-10 is -5, by 11-20 -10,
+ * by more -20. Reproduces every coach's stored season FPT. Counted live, on the score
+ * as it stands, so a tie is worth nothing yet.
+ *
+ * Overtime is scored on the margin too. The fantasy API counts OT wins and losses
+ * apart (win_ot / loss_ot); what it awards them was unknown when this was written -
+ * no game had gone to overtime - so check the first one against the stored FPT.
+ */
+export function coachPoints(margin) {
+    if (margin > 20) return 25;
+    if (margin > 10) return 20;
+    if (margin > 0) return 10;
+    if (margin === 0) return 0;
+    if (margin >= -10) return -5;
+    if (margin >= -20) return -10;
+    return -20;
+}

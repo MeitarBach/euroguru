@@ -2,8 +2,9 @@ import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { currentRound } from '../lib/live/schedule';
 import { matchLines } from '../lib/live/names';
 import { euroleagueCode } from '../lib/live/teams';
-import { RateLimitedError, winBonus, round1 } from '../lib/live/feed';
+import { RateLimitedError, winBonus, round1, coachPoints } from '../lib/live/feed';
 import { scoreOf } from '../lib/live/rows';
+import { marginText } from '../lib/live/format';
 
 // Start asking this long before a tip-off: the feed often fills in a little early.
 const NEAR_TIPOFF_MS = 10 * 60_000;
@@ -63,9 +64,13 @@ function indexLines(lines, rosterByCode) {
  * the page is hidden and catches up the moment it is shown again; backs off on failures.
  *
  * Also turns successive boxscores into a feed of events and an FPT history per watched
- * player, both kept in sessionStorage so a reload mid-game keeps them.
+ * player, both kept in sessionStorage so a reload mid-game keeps them. `watchCoaches`
+ * ({ key, code, name }) get the same from the score alone: a coach is worth their
+ * club's margin, so the header is all they need.
  */
-export default function useLiveRound({ source, seasonCode, roster, watchKeys, onEvents, focusCode = null }) {
+export default function useLiveRound({
+    source, seasonCode, roster, watchKeys, watchCoaches = [], onEvents, focusCode = null,
+}) {
     const [schedule, setSchedule] = useState(null);
     const [scheduleError, setScheduleError] = useState(null);
     const [gameStates, setGameStates] = useState({});
@@ -117,7 +122,9 @@ export default function useLiveRound({ source, seasonCode, roster, watchKeys, on
     // has to restart when a player is added or the roster lands.
     const live = useRef({});
     useEffect(() => {
-        live.current = { ...live.current, source, games, rosterByCode, watchedCodes, watchKeys, onEvents, focusCode };
+        live.current = {
+            ...live.current, source, games, rosterByCode, watchedCodes, watchKeys, watchCoaches, onEvents, focusCode,
+        };
     });
 
     // Restore this round's feed and sparklines from earlier in the session.
@@ -152,7 +159,9 @@ export default function useLiveRound({ source, seasonCode, roster, watchKeys, on
         const tick = async () => {
             const {
                 source: src, games: roundGames, rosterByCode: rosters, watchedCodes: codes, watchKeys: keys, focusCode: focus,
+                watchCoaches: coaches,
             } = live.current;
+            const coachCodes = new Set(coaches.map(c => c.code));
             const prevStates = live.current.states ?? {};
             const now = Date.now();
             const watching = new Set(keys);
@@ -207,7 +216,7 @@ export default function useLiveRound({ source, seasonCode, roster, watchKeys, on
                 // Only transitions seen happening are news; a game that was already over
                 // when the page opened is just a result. And only games with someone in
                 // them the viewer follows - the feed is about their players.
-                const followed = codes.has(game.homeCode) || codes.has(game.awayCode);
+                const followed = [game.homeCode, game.awayCode].some(c => codes.has(c) || coachCodes.has(c));
                 if (followed && prev && prev.status === 'scheduled' && next.status === 'live') {
                     events.push({ kind: 'tipoff', game: game.code, at: now, text: `${game.homeCode} vs ${game.awayCode} tipped off` });
                 }
@@ -252,6 +261,31 @@ export default function useLiveRound({ source, seasonCode, roster, watchKeys, on
                     if (!line) continue;
                     const event = track(key, line, prev?.byKey?.[key]);
                     if (event) events.push(event);
+                }
+
+                // A followed coach moves only when the margin crosses into another band,
+                // so their events are rare and each one is a swing worth hearing about.
+                const marginOf = (state, code) => (state && state.status !== 'scheduled'
+                    ? (code === game.homeCode ? 1 : -1) * ((state.scoreHome ?? 0) - (state.scoreAway ?? 0))
+                    : null);
+                for (const coach of coaches) {
+                    if (coach.code !== game.homeCode && coach.code !== game.awayCode) continue;
+                    const margin = marginOf(next, coach.code);
+                    if (margin === null) continue;
+                    const score = coachPoints(margin);
+                    const points = history[coach.key] ?? (next.status !== 'final' ? [0] : []);
+                    if (points[points.length - 1] !== score) {
+                        history[coach.key] = [...points, score].slice(-MAX_HISTORY);
+                        historyChanged = true;
+                    }
+                    if (!prev) continue;
+                    const before = marginOf(prev, coach.code);
+                    const delta = score - (before === null ? 0 : coachPoints(before));
+                    if (delta === 0) continue;
+                    events.push({
+                        kind: 'player', key: coach.key, name: coach.name, game: game.code, at: now, delta, score,
+                        parts: [marginText(margin, next.status === 'final')], period: next.period, clock: next.clock,
+                    });
                 }
 
                 // The open game's own feed: every line in it, watched or not.

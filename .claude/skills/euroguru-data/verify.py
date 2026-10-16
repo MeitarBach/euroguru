@@ -22,12 +22,15 @@ from run_dev_fetch import CURRENT_SEASON  # noqa: E402
 from utils.data_fetchers import latest_round  # noqa: E402
 from utils.s3_utils import load_from_s3  # noqa: E402
 from utils.defense_vs_position import rollup_key  # noqa: E402
+from utils.coaches import coaches_key  # noqa: E402
+from utils.data_processing import DUNKEST_TEAM_CODES  # noqa: E402
 
 SEASON = CURRENT_SEASON
 STATS = f"player_stats_{SEASON}.csv"
 FANTASY = f"player_stats_fantasy_{SEASON}.csv"
 SCHEDULE = f"schedule_{SEASON}.csv"
 DVP = rollup_key(SEASON)
+COACHES = coaches_key(SEASON)
 STATE = os.path.join(tempfile.gettempdir(), "euroguru-data-snapshot.json")
 LOCAL_API = "http://localhost:8000/api"
 
@@ -191,6 +194,23 @@ def check_dvp(rep, fantasy, schedule):
                                 f"{len(dvp)} rows")
 
 
+def check_coaches(rep):
+    """One head coach per club, each mapped to a Euroleague code the live feed knows."""
+    coaches = _quiet_load(COACHES)
+    if coaches.empty:
+        rep.line("FAIL", "coaches", f"{COACHES} missing - the CR fetch did not save the coaches")
+        return
+    clubs = set(DUNKEST_TEAM_CODES)
+    teams = list(coaches["Team"])
+    unmapped = sorted(coaches.loc[coaches["TeamCode"].isna(), "Team"])
+    if unmapped or len(teams) != len(set(teams)) or set(teams) != clubs:
+        rep.line("FAIL", "coaches", f"{len(teams)} coaches; missing clubs {sorted(clubs - set(teams))}, "
+                                    f"duplicates {sorted({t for t in teams if teams.count(t) > 1})}, "
+                                    f"unmapped {unmapped}")
+        return
+    rep.line("PASS", "coaches", f"{len(teams)} coaches, one per club")
+
+
 def check_local_api(rep, top_name, top_round):
     try:
         d = _get_json(f"{LOCAL_API}/player?" + urllib.parse.urlencode({"name": top_name, "season": SEASON}))
@@ -232,6 +252,7 @@ def check(local_api=False):
     check_schedule(rep, stats, schedule, new_games)
     new_fantasy = check_fantasy(rep, fantasy, schedule, before)
     check_dvp(rep, fantasy, schedule)
+    check_coaches(rep)
 
     # The same "does every season load and render" check promote.py runs.
     import contextlib

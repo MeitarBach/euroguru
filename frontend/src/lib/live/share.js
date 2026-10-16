@@ -2,8 +2,8 @@
  * Sharing a group: an invite link that carries the group itself, and a branded image of
  * its live standings. Every share is a small ad for EuroGuru, which is the point.
  *
- * The link needs no server: the group (name, players, bench, captain) is encoded in the
- * URL, and opening it offers to add the group on the reader's own device.
+ * The link needs no server: the group (name, players, bench, captain, coach) is encoded
+ * in the URL, and opening it offers to add the group on the reader's own device.
  */
 
 const SITE = 'https://eurogurufantasy.com';
@@ -22,6 +22,7 @@ export function inviteLink(group) {
         k: group.keys.map(id).filter(Number.isFinite),
         b: (group.bench ?? []).map(id),
         c: group.captain ? id(group.captain) : undefined,
+        h: group.coach ? Number(String(group.coach).replace(/^coach:/, '')) : undefined,
     };
     const origin = typeof window !== 'undefined' ? window.location.origin : SITE;
     return `${origin}/?join=${toBase64Url(JSON.stringify(payload))}`
@@ -41,6 +42,7 @@ export function readInvite(search = window.location.search) {
             keys,
             bench: (raw.b ?? []).filter(Number.isFinite).map(key),
             captain: Number.isFinite(raw.c) ? key(raw.c) : null,
+            coach: Number.isFinite(raw.h) ? `coach:${raw.h}` : null,
         };
     } catch {
         return null;
@@ -109,9 +111,12 @@ export async function groupCard(group, round) {
     g.font = font(600, 30);
     g.fillStyle = '#a1a1aa';
     g.fillText('fantasy points', 64 + totalWidth + 18, 330);
-    g.fillText(`${group.rows.length} players${group.sums.live ? ` · ${group.sums.live} playing now` : ''}`, 64, 380);
+    g.fillText(`${group.rows.length} players${group.coachRow ? ' + coach' : ''}${group.sums.live ? ` · ${group.sums.live} playing now` : ''}`, 64, 380);
 
-    const rows = group.rows.slice(0, 8);
+    // The coach takes the last line when there is one.
+    const rows = group.coachRow
+        ? [...group.rows.slice(0, 7), group.coachRow]
+        : group.rows.slice(0, 8);
     rows.forEach((row, i) => {
         const y = 430 + i * 66;
         g.fillStyle = 'rgba(255,255,255,0.05)';
@@ -123,7 +128,7 @@ export async function groupCard(group, round) {
         g.fillText(row.player.position || '', 80, y + 36);
         g.fillStyle = '#fff';
         g.font = font(700, 28);
-        const role = row.captain ? '  (C)' : row.benched ? '  (bench)' : '';
+        const role = row.isCoach ? '  (coach)' : row.captain ? '  (C)' : row.benched ? '  (bench)' : '';
         g.fillText(`${row.player.PlayerName}${role}`, 130, y + 38);
         g.font = font(800, 30);
         const value = row.counted === null ? '–' : fmt(row.counted);

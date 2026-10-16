@@ -12,7 +12,10 @@ const NAME_MAX = 24;
 // Colours a group keeps for life: stored by index, so deleting one never repaints another.
 export const GROUP_COLORS = ['#a78bfa', '#38bdf8', '#fbbf24', '#34d399', '#fb7185', '#22d3ee', '#f472b6', '#a3e635'];
 
-const DEFAULT_GROUPS = [{ id: 'g-mine', name: 'My team', color: 0, keys: [], bench: [], captain: null }];
+const DEFAULT_GROUPS = [{ id: 'g-mine', name: 'My team', color: 0, keys: [], bench: [], captain: null, coach: null }];
+
+// A head coach's key ("coach:<CoachID>", see lib/live/rows.js coachKey).
+const isCoachKey = (key) => typeof key === 'string' && /^coach:\d+$/.test(key);
 
 function load() {
     try {
@@ -33,6 +36,7 @@ function load() {
                     keys,
                     bench,
                     captain,
+                    coach: isCoachKey(g.coach) ? g.coach : null,
                 };
             });
     } catch {
@@ -52,7 +56,7 @@ const cleanName = (name, fallback) => String(name ?? '').trim().slice(0, NAME_MA
 
 /**
  * Named groups of players followed on the Live tab - "My team", and the teams of the
- * people in your league - each with its own total.
+ * people in your league - each with its own total, and optionally a head coach.
  *
  * A player may sit in several groups: fantasy rosters are not exclusive, so you and a
  * rival can both own Vezenkov. Stored like every other setting (localStorage, kept in
@@ -133,9 +137,17 @@ export default function useWatchGroups() {
         return group?.keys.includes(key) ? remove(groupId, key) : add(groupId, key);
     }, [groups, add, remove]);
 
+    // One coach per group: naming one replaces the last, naming the same one clears it.
+    // Coaches sit outside the free limit - it is about players followed.
+    const toggleCoach = useCallback((groupId, key) => {
+        if (!isCoachKey(key)) return;
+        save(groups.map(g => (g.id === groupId ? { ...g, coach: g.coach === key ? null : key } : g)));
+    }, [groups, save]);
+
     // `keys` seeds the group - a player picked in the game view goes straight in, subject
     // to the same free limit as any other add.
-    // `roles` ({ bench, captain }) comes with a group imported from an invite link.
+    // `roles` ({ bench, captain, coach }) comes with a group imported from an invite link,
+    // or a coach picked in the game view.
     const create = useCallback((name, keys = [], roles = {}) => {
         const used = new Set(groups.map(g => g.color));
         const color = GROUP_COLORS.findIndex((_, i) => !used.has(i));
@@ -149,6 +161,7 @@ export default function useWatchGroups() {
             keys: keys.filter(k => allKeys.includes(k) || fresh.indexOf(k) < allowed),
             bench: [],
             captain: null,
+            coach: isCoachKey(roles.coach) ? roles.coach : null,
         };
         group.bench = (roles.bench ?? []).filter(k => group.keys.includes(k));
         group.captain = group.keys.includes(roles.captain) && !group.bench.includes(roles.captain) ? roles.captain : null;
@@ -169,7 +182,7 @@ export default function useWatchGroups() {
 
     return {
         groups, selected, select, allKeys,
-        add, remove, toggle, toggleBench, toggleCaptain, create, rename, destroy,
+        add, remove, toggle, toggleBench, toggleCaptain, toggleCoach, create, rename, destroy,
         atLimit, limit: locked ? FREE_WATCH_LIMIT : null,
     };
 }

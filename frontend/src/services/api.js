@@ -138,6 +138,15 @@ export const fetchDefenseVsPosition = (season, round) =>
         null
     );
 
+// The season's head coaches (name, club, CR) for the Live tab's coach slot. Empty when
+// the data run has not written them yet; the slot just has nobody to offer.
+export const fetchCoaches = (season) =>
+    cached(
+        `coaches:${season}`,
+        () => client.get(`${API_URL}/coaches`, { params: { season } }),
+        []
+    );
+
 export const fetchRecommendations = (params) =>
     cached(
         `recommend:${JSON.stringify(params)}`,
