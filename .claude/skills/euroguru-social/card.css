@@ -36,34 +36,43 @@ h1 { margin-top: 24px; font-size: 44px; line-height: 1.1; font-weight: 800; lett
 
 .content { flex: 1; display: flex; align-items: center; padding: 14px 0 22px; }
 
-/* Layout 1: one column per position. */
-.cols { width: 100%; display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
-.col { background: rgba(255, 255, 255, 0.045); border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 20px; padding: 22px 24px; }
-.col .pos { display: inline-block; font-size: 15px; font-weight: 800; letter-spacing: 2px; color: #c4b5fd; }
-.col .name { margin-top: 8px; font-size: 30px; font-weight: 800; letter-spacing: -0.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.col .team { font-size: 16px; color: #71717a; margin-top: 2px; }
-.col .big { margin-top: 14px; font-size: 52px; font-weight: 800; font-family: "SF Mono", Menlo, monospace; letter-spacing: -2px; }
-.col .big small { font-size: 16px; color: #a1a1aa; font-family: inherit; letter-spacing: 0; margin-left: 6px; }
-.col .meta { margin-top: 10px; display: flex; gap: 16px; font-size: 17px; color: #a1a1aa; }
-.col .meta b { color: #fff; font-weight: 700; }
-
-/* Layout 2: a ranked list. */
-.list { width: 100%; display: flex; flex-direction: column; gap: 7px; }
-.row { display: grid; grid-template-columns: 30px 56px 1fr auto auto; align-items: center; gap: 18px;
-  background: rgba(255, 255, 255, 0.045); border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 16px; padding: 7px 22px; }
-.row .rank { font-size: 22px; font-weight: 800; color: #71717a; font-family: "SF Mono", Menlo, monospace; }
-.row:first-child .rank { color: #fbbf24; }
-.row .chip { font-size: 14px; font-weight: 800; letter-spacing: 1.5px; text-align: center; color: #c4b5fd;
-  padding: 5px 0; border-radius: 8px; background: rgba(139, 92, 246, 0.16); }
-.row .who .name { font-size: 25px; font-weight: 800; letter-spacing: -0.3px; }
-.row .who .detail { font-size: 15px; color: #a1a1aa; margin-top: 1px; }
-.row .side { font-size: 16px; color: #a1a1aa; text-align: right; white-space: nowrap; }
-.row .side b { color: #fff; }
-.row .big { font-size: 34px; font-weight: 800; font-family: "SF Mono", Menlo, monospace; min-width: 110px; text-align: right; }
-.row .big.up { color: #34d399; } .row .big.down { color: #f87171; }
-.row .big small { display: block; font-size: 12px; color: #71717a; font-family: Inter, sans-serif; letter-spacing: 1px; margin-top: -2px; }
+/* Player cards: each player's headshot over a purple halo, the stat top right, the
+   details at the bottom. Up to 3 to an image; .compact fits a lineup of 5. */
+/* The cards take the height left under the title, so a two-line title never pushes them
+   into the footer. */
+.pcards { width: 100%; align-self: stretch; display: grid; gap: 20px; }
+.pcard { position: relative; overflow: hidden; border-radius: 20px;
+  background: rgba(255, 255, 255, 0.045); border: 1px solid rgba(255, 255, 255, 0.08); }
+.pcard .halo { position: absolute; left: 50%; top: 18px; width: 230px; height: 230px; transform: translateX(-50%);
+  border-radius: 50%; background: radial-gradient(circle, rgba(139, 92, 246, 0.55), rgba(139, 92, 246, 0) 70%); }
+.pcard .shot { position: absolute; left: 50%; top: 6px; height: 300px; transform: translateX(-50%);
+  -webkit-mask-image: linear-gradient(to bottom, #000 52%, transparent 70%); }
+.pcard .initials { position: absolute; left: 50%; top: 56px; width: 150px; height: 150px; transform: translateX(-50%);
+  display: flex; align-items: center; justify-content: center; border-radius: 50%; font-size: 54px; font-weight: 800;
+  color: #ddd6fe; background: rgba(139, 92, 246, 0.25); border: 2px solid rgba(167, 139, 250, 0.45); }
+.pcard .chip { position: absolute; top: 18px; left: 18px; font-size: 14px; font-weight: 800; letter-spacing: 1.5px;
+  color: #c4b5fd; background: rgba(139, 92, 246, 0.22); border-radius: 8px; padding: 5px 10px; }
+.pcard .stat { position: absolute; top: 16px; right: 18px; text-align: right; }
+.pcard .stat b { display: block; font-size: 40px; font-weight: 800; letter-spacing: -1.5px;
+  font-family: "SF Mono", Menlo, monospace; text-shadow: 0 2px 12px rgba(0, 0, 0, 0.6); }
+.pcard .stat small { font-size: 12px; letter-spacing: 1px; color: #a1a1aa; text-transform: uppercase; }
+.pcard .stat.up b { color: #34d399; } .pcard .stat.down b { color: #f87171; }
+.pcard .info { position: absolute; left: 0; right: 0; bottom: 0; padding: 0 22px 20px; }
+.pcard .name { font-size: 30px; font-weight: 800; letter-spacing: -0.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pcard .line { margin-top: 2px; font-size: 17px; color: #e4e4e7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pcard .meta { margin-top: 10px; padding-top: 10px; display: flex; justify-content: space-between; gap: 12px;
+  font-size: 15px; color: #a1a1aa; white-space: nowrap; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.pcard .meta b { color: #fff; }
+.pcards.compact { gap: 14px; }
+.pcards.compact .halo { width: 180px; height: 180px; }
+.pcards.compact .shot { top: 12px; height: 290px;
+  -webkit-mask-image: linear-gradient(to bottom, #000 60%, transparent 80%); }
+.pcards.compact .initials { width: 120px; height: 120px; font-size: 42px; }
+.pcards.compact .info { padding: 0 16px 16px; }
+.pcards.compact .name { font-size: 21px; }
+.pcards.compact .line { font-size: 14px; color: #a1a1aa; }
+.pcards.compact .stat { position: static; margin-top: 8px; text-align: left; display: flex; align-items: baseline; gap: 8px; }
+.pcards.compact .stat b { display: inline; font-size: 32px; }
 .tag { display: inline-block; margin-left: 8px; font-size: 13px; font-weight: 800; padding: 2px 8px; border-radius: 6px;
   vertical-align: 4px; letter-spacing: 1px; }
 .tag.c { background: #facc15; color: #111; } .tag.out { background: rgba(248, 113, 113, 0.2); color: #fca5a5; }

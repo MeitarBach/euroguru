@@ -23,7 +23,8 @@ accounts, fantasy creators, and big fan accounts in Greece, Israel, Turkey, Spai
 
 Run **`/euroguru-social`** in Claude Code whenever you sit down to post. It creates the
 posts that fit right now and tells you what to post and when (all of it is also in
-`social/PLAN.md`).
+`social/POSTS.md` - every post in order, each with its own folder holding `post.md` and
+the image).
 
 | When | Post (core) |
 |---|---|
@@ -39,6 +40,9 @@ people, so the link always goes in the reply).
 
 Run `/euroguru-social` again after each game night and after the round - it picks up what
 is new.
+
+The morning after each game night, run **`/euroguru-data`** first: it fetches the new
+games, checks them locally, and promotes them to the live app once you say yes.
 
 ## Game nights: replies (≈10 minutes) - the biggest growth lever
 
@@ -60,5 +64,5 @@ is new.
 ## Later
 - Short video (the Live-tab clip) on TikTok / Reels / Shorts.
 - A public EuroGuru mini-league in EuroLeague Fantasy, with a weekly shout-out.
-- Hebrew: every post is generated in Hebrew too (each post's `.json` → `tweets.he`).
+- Hebrew: every post is generated in Hebrew too (at the bottom of each post's `post.md`).
 - Reddit: each recap also writes `reddit.md`, ready for r/Euroleague.

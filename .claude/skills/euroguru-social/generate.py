@@ -5,13 +5,15 @@ before and after every fantasy round.
 
     python generate.py pre                 # posts for the next round
     python generate.py post --round 3      # recap of a finished round
-    python generate.py night               # tonight's top 5, once tonight's games are final
+    python generate.py night               # tonight's top 3, once tonight's games are final
     python generate.py live                # leaders in the games on right now (for replies)
     python generate.py pre --only hot-hand,budget-picks
 
-Output goes to social/round-XX/<batch>/ at the repo root: <id>.json (the tweets, English
-and Hebrew: main post, the reply carrying the link, or a poll / thread), <id>.png and a
-README.md. Nothing is posted here - xpost.py does that.
+Output goes to social/round-XX/<batch>/<post id>/ at the repo root: post.md (the post
+ready to copy - main text, the reply carrying the link, or a poll / thread - in English
+and Hebrew) next to <post id>.png. Each batch also gets a POSTS.md with all of its posts
+in order, and `prepare` writes social/POSTS.md: every post that fits now, in posting
+order, to choose from. Nothing is posted here - the user posts by hand.
 
 Standard library only. Data comes from the public EuroGuru API and, for round recaps,
 straight from Euroleague's feeds - scored exactly as the fantasy game scores it (PIR,
@@ -45,6 +47,13 @@ API = "https://euroguru-api.vercel.app/api"
 SEASON = "2026"
 SCHEDULE_URL = f"https://api-live.euroleague.net/v1/schedules?seasonCode=E{SEASON}"
 BOXSCORE_URL = "https://live.euroleague.net/api/Boxscore?gamecode={code}&seasoncode=E" + SEASON
+# Every club's roster for the season, with the official headshot of each player.
+PEOPLE_URL = (f"https://api-live.euroleague.net/v2/competitions/E/seasons/E{SEASON}/people"
+              "?personType=J&limit=1000")  # players only; the default page stops at 500 people
+HEADSHOTS = OUT_ROOT / ".headshots"  # downloaded once, reused by every later card
+# Players per image: more than this and the card gets crowded. Team of the round (a
+# lineup of 5) is the one exception, drawn with compact cards.
+MAX_PLAYERS = 3
 
 SITE = "https://eurogurufantasy.com"
 TAGS = "#EuroLeagueFantasy #EuroLeague"
@@ -104,6 +113,56 @@ def name_parts(name):
 
 def el_code(player):
     return player.get("TeamCode") or DUNKEST_TO_EL.get(str(player.get("Team", "")).upper())
+
+
+_roster = None
+
+
+def roster_photos():
+    """Every player on a EuroLeague roster this season that has a headshot."""
+    global _roster
+    if _roster is None:
+        _roster = []
+        try:
+            rows = json.loads(fetch(PEOPLE_URL)).get("data", [])
+        except Exception as exc:  # no photos is not worth losing the batch over
+            print(f"  ! headshots unavailable ({exc}) - cards show initials")
+            rows = []
+        for row in rows:
+            url = (row.get("images") or {}).get("headshot")
+            if row.get("type") == "J" and url:
+                initial, last = name_parts(row["person"]["name"])
+                _roster.append({"club": row["club"]["code"], "initial": initial, "last": last,
+                                "code": row["person"]["code"], "url": url, "active": row.get("active")})
+    return _roster
+
+
+def headshot(name, club=None):
+    """A player's official photo as a local file, or None. Matched like the boxscores:
+    club + initial + surname first, then looser, and only when the match is unique."""
+    initial, last = name_parts(name)
+    same = [p for p in roster_photos() if p["last"] == last]
+    for pool in ([p for p in same if p["club"] == club and p["initial"] == initial],
+                 [p for p in same if p["club"] == club],
+                 [p for p in same if p["initial"] == initial]):
+        if len({p["code"] for p in pool}) == 1:
+            person = sorted(pool, key=lambda p: not p["active"])[0]
+            break
+    else:
+        print(f"  ! no headshot for {name} ({club}) - initials used")
+        return None
+    path = HEADSHOTS / f"{person['code']}.png"
+    if not path.exists():
+        try:
+            raw = fetch(person["url"])
+        except Exception as exc:
+            print(f"  ! headshot download failed for {name}: {exc}")
+            return None
+        if not raw.startswith(b"\x89PNG"):
+            return None
+        HEADSHOTS.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(raw)
+    return path
 
 
 def injuries():
@@ -208,8 +267,13 @@ def round_scores(games, rnd, roster, final_bonus=True):
 
 # --- formatting --------------------------------------------------------------------
 
+def display_name(name):
+    """Some feeds lower-case the part after a hyphen ('N. Hayes-davis')."""
+    return re.sub(r"-([a-z])", lambda m: "-" + m.group(1).upper(), name)
+
+
 def surname(name):
-    clean = re.sub(r"\s*\([^)]*\)$", "", name)
+    clean = re.sub(r"\s*\([^)]*\)$", "", display_name(name))
     return clean.split(" ", 1)[1] if " " in clean else clean
 
 
@@ -229,39 +293,46 @@ def x_length(text):
     return sum(2 if ord(c) > 0x2FFF else 1 for c in text)
 
 
-def cols_body(items):
-    """Three position columns. items: dicts with pos, name, team, big, unit, meta[(label, value)]."""
-    cells = []
+def initials(name):
+    initial, last = name_parts(name)
+    return f"{initial}{last[:1]}"
+
+
+def photo_body(items):
+    """Player cards, each with the player's headshot - the layout for every post about
+    players. Up to MAX_PLAYERS cards; more (team of the round) switch to compact cards.
+    items: dicts with pos, name, team (Euroleague code, finds the photo), big, unit,
+    line, meta [html snippets], tone ('up' / 'down'), tag ((css class, text))."""
+    compact = len(items) > MAX_PLAYERS
+    cards = []
     for it in items:
-        meta = "".join(f"<span>{html.escape(k)} <b>{html.escape(v)}</b></span>" for k, v in it["meta"])
-        cells.append(
-            f'<div class="col"><span class="pos">{it["pos"]}</span>'
-            f'<div class="name">{html.escape(it["name"])}</div><div class="team">{html.escape(it["team"])}</div>'
-            f'<div class="big">{it["big"]}<small>{it["unit"]}</small></div><div class="meta">{meta}</div></div>')
-    return f'<div class="cols">{"".join(cells)}</div>'
-
-
-def list_body(items):
-    """A ranked list. items: dicts with pos, name, detail, side, big, unit, tone, tag."""
-    rows = []
-    for i, it in enumerate(items, 1):
+        shot = headshot(it["name"], it.get("team"))
+        photo = (f'<img class="shot" src="{shot.as_uri()}" alt="">' if shot
+                 else f'<div class="initials">{html.escape(initials(it["name"]))}</div>')
         tag = f'<span class="tag {it["tag"][0]}">{it["tag"][1]}</span>' if it.get("tag") else ""
-        rows.append(
-            f'<div class="row"><span class="rank">{i}</span><span class="chip">{it["pos"]}</span>'
-            f'<div class="who"><div class="name">{html.escape(it["name"])}{tag}</div>'
-            f'<div class="detail">{html.escape(it["detail"])}</div></div>'
-            f'<span class="side">{it["side"]}</span>'
-            f'<span class="big {it.get("tone", "")}">{it["big"]}<small>{it["unit"]}</small></span></div>')
-    return f'<div class="list">{"".join(rows)}</div>'
+        stat = f'<div class="stat {it.get("tone", "")}"><b>{it["big"]}</b><small>{it["unit"]}</small></div>'
+        meta = "".join(f"<span>{m}</span>" for m in it.get("meta") or [])
+        cards.append(
+            f'<div class="pcard"><div class="halo"></div>{photo}<span class="chip">{it["pos"]}</span>'
+            f'{"" if compact else stat}'
+            f'<div class="info"><div class="name">{html.escape(display_name(it["name"]))}{tag}</div>'
+            f'<div class="line">{html.escape(it.get("line") or "")}</div>'
+            f'{stat if compact else (f"<div class=meta>{meta}</div>" if meta else "")}</div></div>')
+    return (f'<div class="pcards{" compact" if compact else ""}" '
+            f'style="grid-template-columns: repeat({len(items)}, 1fr)">{"".join(cards)}</div>')
+
+
+def cr_meta(cr):
+    return f"<b>{num(cr)}</b> CR"
 
 
 
 # --- the posts ---------------------------------------------------------------------
-# A builder returns a card - title, subtitle, body (the image's HTML) - plus the tweet's
-# parts: `hook` / `hook_he` (the opening line in English and Hebrew) and `lines` (the
-# player lines, shared by both). compose() turns that into the main tweet, the reply that
-# carries the link, and the Hebrew pair. A builder may instead return a `poll` or a
-# `thread`, and returns None to skip.
+# A builder returns a card - title, subtitle, body (the image's HTML, from photo_body) -
+# plus the tweet's parts: `hook` / `hook_he` (the opening line in English and Hebrew) and
+# `lines` (the player lines, shared by both - the same players as the image). compose()
+# turns that into the main tweet, the reply that carries the link, and the Hebrew pair. A
+# builder may instead return a `poll` or a `thread`, and returns None to skip.
 
 def healthy(players, inj):
     return [p for p in players if name_parts(p["PlayerName"]) not in inj]
@@ -279,11 +350,11 @@ def post_consistent(ctx):
         return None
     r = ctx["round"]
     return {
-        "title": "The most consistent healthy player at every position",
+        "title": "The safest pick at every position",
         "subtitle": "Highest reliable floor (average − 2 × SD) this season, injured players excluded",
-        "body": cols_body([{"pos": p["position"], "name": p["PlayerName"], "team": p["Team"],
-                            "big": num(p["Average_Score"]), "unit": "avg FPT",
-                            "meta": [("SD", num(p.get("StdDev_Score") or 0)), ("CR", num(p["CR"]))]} for p in picks]),
+        "body": photo_body([{"pos": p["position"], "name": p["PlayerName"], "team": el_code(p), "line": el_code(p),
+                             "big": num(p["Average_Score"]), "unit": "avg FPT",
+                             "meta": [f"SD <b>{num(p.get('StdDev_Score') or 0)}</b>", cr_meta(p["CR"])]} for p in picks]),
         "hook": f"🎯 The safest pick at every position for Round {r}, by EuroGuru's reliability score:",
         "hook_he": f"🎯 הבחירה הכי בטוחה בכל עמדה למחזור {r}, לפי ציון האמינות של EuroGuru:",
         "lines": [f"{p['position']} {surname(p['PlayerName'])} · {num(p['Average_Score'])} avg · "
@@ -293,16 +364,19 @@ def post_consistent(ctx):
 
 def post_hot(ctx):
     rows = sorted((p for p in ctx["last3"] if p.get("Average_Score") is not None),
-                  key=lambda p: -p["Average_Score"])[:5]
+                  key=lambda p: -p["Average_Score"])[:MAX_PLAYERS]
     if not rows:
         return None
     r = ctx["round"]
+    season = {name_parts(p["PlayerName"]): p.get("Average_Score") for p in ctx["season"]}
     return {
         "title": "Who's hot going into the round",
         "subtitle": "Best average FPT over each player's last 3 games",
-        "body": list_body([{"pos": p["position"], "name": p["PlayerName"], "detail": p["Team"],
-                            "side": f"<b>{num(p['CR'])}</b> CR", "big": num(p["Average_Score"]), "unit": "LAST 3"}
-                           for p in rows]),
+        "body": photo_body([{"pos": p["position"], "name": p["PlayerName"], "team": el_code(p), "line": el_code(p),
+                             "big": num(p["Average_Score"]), "unit": "last 3",
+                             "meta": [f"season <b>{num(season[name_parts(p['PlayerName'])])}</b>"
+                                      if season.get(name_parts(p["PlayerName"])) is not None else "",
+                                      cr_meta(p["CR"])]} for p in rows]),
         "hook": f"🔥 Hottest players before Round {r} (last 3 games), via EuroGuru:",
         "hook_he": f"🔥 הכי חמים לפני מחזור {r} (3 משחקים אחרונים), לפי EuroGuru:",
         "lines": [f"{i}. {surname(p['PlayerName'])} {num(p['Average_Score'])} · {num(p['CR'])} CR"
@@ -313,7 +387,7 @@ def post_hot(ctx):
 def post_budget(ctx):
     rows = sorted((p for p in healthy(ctx["last5"], ctx["inj"])
                    if p.get("Average_Score") is not None and p["CR"] <= 10),
-                  key=lambda p: -p["Average_Score"])[:5]
+                  key=lambda p: -p["Average_Score"])[:MAX_PLAYERS]
     if not rows:
         return None
     r = ctx["round"]
@@ -322,9 +396,10 @@ def post_budget(ctx):
     return {
         "title": "Budget picks: 10 CR or less",
         "subtitle": "Best average FPT over the last 5 games among healthy players at ≤10 CR",
-        "body": list_body([{"pos": p["position"], "name": p["PlayerName"], "detail": p["Team"],
-                            "side": f"<b>{num(p['CR'])}</b> CR", "big": num(p["Average_Score"]), "unit": "AVG FPT"}
-                           for p in rows]),
+        "body": photo_body([{"pos": p["position"], "name": p["PlayerName"], "team": el_code(p), "line": el_code(p),
+                             "big": num(p["Average_Score"]), "unit": "avg FPT",
+                             "meta": [f"<b>{num(p['Average_Score'] / p['CR'], 2)}</b> FPT / CR", cr_meta(p["CR"])]}
+                            for p in rows]),
         "insight": (f"{surname(rows[0]['PlayerName'])} out-scores {beaten} players priced 14+ CR." if beaten else None),
         "insight_he": (f"{surname(rows[0]['PlayerName'])} מקדים {beaten} שחקנים שעולים 14+ קרדיט." if beaten else None),
         "hook": f"💰 No need to pay 15 CR. EuroGuru's best ≤10 CR picks for Round {r}:",
@@ -346,9 +421,9 @@ def post_value(ctx):
     return {
         "title": "Value kings: most FPT per credit",
         "subtitle": "Season FPT per CR spent, best at each position",
-        "body": cols_body([{"pos": p["position"], "name": p["PlayerName"], "team": p["Team"],
-                            "big": num(p["Value"], 2), "unit": "FPT / CR",
-                            "meta": [("Avg", num(p["Average_Score"])), ("CR", num(p["CR"]))]} for p in picks]),
+        "body": photo_body([{"pos": p["position"], "name": p["PlayerName"], "team": el_code(p), "line": el_code(p),
+                             "big": num(p["Value"], 2), "unit": "FPT / CR",
+                             "meta": [f"avg <b>{num(p['Average_Score'])}</b>", cr_meta(p["CR"])]} for p in picks]),
         "hook": f"👑 Most FPT per credit at each position before Round {r}, via EuroGuru:",
         "hook_he": f"👑 הכי הרבה FPT לקרדיט בכל עמדה לפני מחזור {r}, לפי EuroGuru:",
         "lines": [f"{p['position']}: {surname(p['PlayerName'])} · {num(p['Value'], 2)} FPT/CR · "
@@ -357,19 +432,19 @@ def post_value(ctx):
 
 
 def post_smart(ctx):
-    recs = api_post("/recommend", {"season": SEASON, "min_cr": 0, "max_cr": 100})[:5]
+    recs = api_post("/recommend", {"season": SEASON, "min_cr": 0, "max_cr": 100})[:MAX_PLAYERS]
     if not recs:
         return None
     r = ctx["round"]
     return {
         "title": "EuroGuru smart picks",
         "subtitle": "Recency-weighted output, value per credit and consistency, combined",
-        "body": list_body([{"pos": x.get("position", ""), "name": x["PlayerName"],
-                            "detail": f"{num(float(x.get('Efficiency') or 0), 2)} FPT/CR efficiency",
-                            "side": f"<b>{num(float(x['CR']))}</b> CR", "big": num(float(x["RecScore"])), "unit": "SCORE"}
-                           for x in recs]),
-        "hook": f"🧠 EuroGuru's model (form × value × consistency) top 5 for Round {r}:",
-        "hook_he": f"🧠 הטופ 5 של המודל של EuroGuru (כושר × תמורה × עקביות) למחזור {r}:",
+        "body": photo_body([{"pos": x.get("position", ""), "name": x["PlayerName"], "team": el_code(x), "line": el_code(x),
+                             "big": num(float(x["RecScore"])), "unit": "score",
+                             "meta": [f"<b>{num(float(x.get('Efficiency') or 0), 2)}</b> FPT / CR", cr_meta(float(x["CR"]))]}
+                            for x in recs]),
+        "hook": f"🧠 EuroGuru's model (form × value × consistency) top {len(recs)} for Round {r}:",
+        "hook_he": f"🧠 הטופ {len(recs)} של המודל של EuroGuru (כושר × תמורה × עקביות) למחזור {r}:",
         "lines": [f"{i}. {surname(x['PlayerName'])} ({x.get('position', '')}) · {num(float(x['CR']))} CR"
                   for i, x in enumerate(recs, 1)],
     }
@@ -378,17 +453,17 @@ def post_smart(ctx):
 def post_injuries(ctx):
     by_key = {name_parts(p["PlayerName"]): p for p in ctx["season"]}
     hit = [(by_key[k], tag, injury) for k, (tag, injury) in ctx["inj"].items() if k in by_key]
-    hit = sorted(hit, key=lambda t: -(t[0]["CR"] or 0))[:5]
+    hit = sorted(hit, key=lambda t: -(t[0]["CR"] or 0))[:MAX_PLAYERS]
     if not hit:
         return None
     r = ctx["round"]
     return {
         "title": "Injury watch: think twice before you pick",
         "subtitle": "Highest-priced players on the injury report",
-        "body": list_body([{"pos": p["position"], "name": p["PlayerName"],
-                            "detail": f"{p['Team']} · {injury}" if injury else p["Team"],
-                            "side": f"avg <b>{num(p['Average_Score'])}</b>" if p.get("Average_Score") is not None else "",
-                            "big": num(p["CR"]), "unit": "CR", "tag": (tag.lower(), tag)} for p, tag, injury in hit]),
+        "body": photo_body([{"pos": p["position"], "name": p["PlayerName"], "team": el_code(p),
+                             "line": injury or el_code(p), "big": num(p["CR"]), "unit": "CR", "tag": (tag.lower(), tag),
+                             "meta": [el_code(p), f"avg <b>{num(p['Average_Score'])}</b>"
+                                      if p.get("Average_Score") is not None else ""]} for p, tag, injury in hit]),
         "hook": f"🚑 Before you lock Round {r}: the priciest names on the injury report",
         "hook_he": f"🚑 לפני שנועלים את מחזור {r}: השחקנים הכי יקרים ברשימת הפציעות",
         "lines": [f"{tag} · {surname(p['PlayerName'])} ({p['Team']}) · {num(p['CR'])} CR" for p, tag, _ in hit],
@@ -412,17 +487,23 @@ def post_captain_poll(ctx):
     }
 
 
+def scorer_cards(rows, unit="FPT"):
+    """Cards for a night's or a round's best fantasy scores."""
+    return photo_body([{"pos": x["position"], "name": x["PlayerName"], "team": el_code(x),
+                        "line": f"{x['pts']} PTS · {x['reb']} REB · {x['ast']} AST",
+                        "big": num(x["fpt"]), "unit": unit, "meta": [f"vs {x['vs']}", cr_meta(x["CR"])]}
+                       for x in rows])
+
+
 def post_top_performers(ctx):
-    rows = sorted(ctx["scores"], key=lambda x: -x["fpt"])[:5]
+    rows = sorted(ctx["scores"], key=lambda x: -x["fpt"])[:MAX_PLAYERS]
     if not rows:
         return None
     r = ctx["round"]
     return {
         "title": f"Round {r}: top performers",
         "subtitle": "Most fantasy points this round, win bonus included",
-        "body": list_body([{"pos": x["position"], "name": x["PlayerName"],
-                            "detail": f"{x['pts']} PTS · {x['reb']} REB · {x['ast']} AST vs {x['vs']}",
-                            "side": f"<b>{num(x['CR'])}</b> CR", "big": num(x["fpt"]), "unit": "FPT"} for x in rows]),
+        "body": scorer_cards(rows),
         "hook": f"⭐ Round {r}'s biggest fantasy scores, tracked live on EuroGuru:",
         "hook_he": f"⭐ הניקודים הגדולים של מחזור {r}, במעקב חי ב-EuroGuru:",
         "lines": [f"{i}. {surname(x['PlayerName'])} {num(x['fpt'])} FPT ({x['pts']}p {x['reb']}r {x['ast']}a)"
@@ -449,10 +530,11 @@ def post_team_of_round(ctx):
     return {
         "title": f"Round {r}: team of the round",
         "subtitle": f"Best 2 G · 2 F · 1 C, captain doubled: {num(total)} FPT",
-        "body": list_body([{"pos": x["position"], "name": x["PlayerName"], "detail": f"{el_code(x)} vs {x['vs']}",
-                            "side": f"<b>{num(x['CR'])}</b> CR", "big": num(x["fpt"] * (2 if x is captain else 1)),
-                            "unit": "FPT ×2" if x is captain else "FPT",
-                            "tag": ("c", "C") if x is captain else None} for x in team]),
+        "body": photo_body([{"pos": x["position"], "name": x["PlayerName"], "team": el_code(x),
+                             "line": f"{el_code(x)} vs {x['vs']} · {num(x['CR'])} CR",
+                             "big": num(x["fpt"] * (2 if x is captain else 1)),
+                             "unit": "FPT ×2" if x is captain else "FPT",
+                             "tag": ("c", "C") if x is captain else None} for x in team]),
         "hook": f"🏆 The perfect Round {r} lineup (2G 2F 1C, captain ×2) scored {num(total)} FPT:",
         "hook_he": f"🏆 החמישייה המושלמת של מחזור {r} (2G 2F 1C, קפטן כפול) עשתה {num(total)} FPT:",
         "lines": [f"{x['position']} {surname(x['PlayerName'])} {num(x['fpt'])}{' (C)' if x is captain else ''}" for x in team],
@@ -460,17 +542,18 @@ def post_team_of_round(ctx):
 
 
 def post_bargains(ctx):
-    rows = sorted((x for x in ctx["scores"] if x["CR"] <= 10 and x["fpt"] > 0), key=lambda x: -(x["fpt"] / x["CR"]))[:5]
+    rows = sorted((x for x in ctx["scores"] if x["CR"] <= 10 and x["fpt"] > 0),
+                  key=lambda x: -(x["fpt"] / x["CR"]))[:MAX_PLAYERS]
     if not rows:
         return None
     r = ctx["round"]
     return {
         "title": f"Round {r}: bargains of the round",
         "subtitle": "Most FPT per credit among players at ≤10 CR",
-        "body": list_body([{"pos": x["position"], "name": x["PlayerName"],
-                            "detail": f"{num(x['fpt'])} FPT · {num(x['CR'])} CR",
-                            "side": f"{el_code(x)} vs {x['vs']}", "big": num(x["fpt"] / x["CR"], 2), "unit": "FPT / CR"}
-                           for x in rows]),
+        "body": photo_body([{"pos": x["position"], "name": x["PlayerName"], "team": el_code(x),
+                             "line": f"{num(x['fpt'])} FPT · {num(x['CR'])} CR",
+                             "big": num(x["fpt"] / x["CR"], 2), "unit": "FPT / CR",
+                             "meta": [f"{el_code(x)} vs {x['vs']}"]} for x in rows]),
         "hook": f"💎 Round {r}'s best value for money - most FPT per credit at ≤10 CR, via EuroGuru:",
         "hook_he": f"💎 התמורה הכי טובה של מחזור {r} - הכי הרבה FPT לקרדיט עד 10 קרדיט, לפי EuroGuru:",
         "lines": [f"{surname(x['PlayerName'])} {num(x['fpt'])} FPT · {num(x['CR'])} CR" for x in rows],
@@ -492,13 +575,19 @@ def post_price_movers(ctx):
     if not moves:
         ctx["notes"].append(f"price-movers skipped: no CR snapshot for round {rnd} yet - run the fetch and promote first.")
         return None
-    pick = sorted(moves, key=lambda m: -m[1])[:3] + sorted(moves, key=lambda m: m[1])[:2]
+    # Two risers and the biggest faller: three cards, both directions.
+    pick = ([m for m in sorted(moves, key=lambda m: -m[1]) if m[1] > 0][:2]
+            + [m for m in sorted(moves, key=lambda m: m[1]) if m[1] < 0][:1])
+    if not pick:
+        return None
     return {
         "title": f"Round {rnd}: price risers and fallers",
         "subtitle": "Biggest CR changes after the round",
-        "body": list_body([{"pos": p["position"], "name": p["playerName"], "detail": p["team"],
-                            "side": f"now <b>{num(cr)}</b> CR", "big": f"{'+' if d > 0 else ''}{num(d)}",
-                            "unit": "CR", "tone": "up" if d > 0 else "down"} for p, d, cr in pick]),
+        "body": photo_body([{"pos": p["position"], "name": p["playerName"],
+                             "team": DUNKEST_TO_EL.get(str(p["team"]).upper(), p["team"]),
+                             "line": DUNKEST_TO_EL.get(str(p["team"]).upper(), p["team"]),
+                             "big": f"{'+' if d > 0 else ''}{num(d)}", "unit": "CR", "tone": "up" if d > 0 else "down",
+                             "meta": [f"now <b>{num(cr)}</b> CR"]} for p, d, cr in pick]),
         "hook": f"📈📉 Round {rnd} price movers, from EuroGuru's price tracker:",
         "hook_he": f"📈📉 מי עלה ומי ירד אחרי מחזור {rnd}, לפי מעקב המחירים של EuroGuru:",
         "lines": [f"{'▲' if d > 0 else '▼'} {surname(p['playerName'])} {'+' if d > 0 else ''}{num(d)} → {num(cr)} CR"
@@ -535,18 +624,16 @@ def post_round_thread(ctx):
 
 
 def post_game_night(ctx):
-    """The night's top 5 once the day's games are final."""
-    rows = sorted(ctx["scores"], key=lambda x: -x["fpt"])[:5]
+    """The night's top 3 once the day's games are final."""
+    rows = sorted(ctx["scores"], key=lambda x: -x["fpt"])[:MAX_PLAYERS]
     if not rows:
         return None
     day = ctx["night"]
     label = day.strftime("%A")
     return {
         "title": f"{label} night: top fantasy performers",
-        "subtitle": f"Round {ctx['round']} · {len(ctx['night_games'])} games, win bonus included",
-        "body": list_body([{"pos": x["position"], "name": x["PlayerName"],
-                            "detail": f"{x['pts']} PTS · {x['reb']} REB · {x['ast']} AST vs {x['vs']}",
-                            "side": f"<b>{num(x['CR'])}</b> CR", "big": num(x["fpt"]), "unit": "FPT"} for x in rows]),
+        "subtitle": f"Round {ctx['round']} · {len(ctx['night_games'])} game{'s' if len(ctx['night_games']) != 1 else ''}, win bonus included",
+        "body": scorer_cards(rows),
         "hook": f"🌙 {label} night in fantasy points, tracked live on EuroGuru (Round {ctx['round']}):",
         "hook_he": f"🌙 הערב בנקודות פנטזי, במעקב חי ב-EuroGuru (מחזור {ctx['round']}):",
         "lines": [f"{i}. {surname(x['PlayerName'])} {num(x['fpt'])} FPT ({x['pts']}p {x['reb']}r {x['ast']}a)"
@@ -556,15 +643,13 @@ def post_game_night(ctx):
 
 def post_live(ctx):
     """Right now, in the games being played: made for replying under game posts."""
-    rows = sorted(ctx["scores"], key=lambda x: -x["fpt"])[:5]
+    rows = sorted(ctx["scores"], key=lambda x: -x["fpt"])[:MAX_PLAYERS]
     if not rows:
         return None
     return {
         "title": "Live: tonight's fantasy leaders",
         "subtitle": "Current fantasy points in the games being played right now",
-        "body": list_body([{"pos": x["position"], "name": x["PlayerName"],
-                            "detail": f"{x['pts']} PTS · {x['reb']} REB · {x['ast']} AST vs {x['vs']}",
-                            "side": f"<b>{num(x['CR'])}</b> CR", "big": num(x["fpt"]), "unit": "FPT LIVE"} for x in rows]),
+        "body": scorer_cards(rows, unit="FPT live"),
         "hook": "🔴 Live on EuroGuru right now - tonight's fantasy leaders:",
         "hook_he": "🔴 בזמן אמת ב-EuroGuru - המובילים בפנטזי הערב:",
         "lines": [f"{surname(x['PlayerName'])} {num(x['fpt'])} FPT ({x['pts']}p {x['reb']}r {x['ast']}a)" for x in rows],
@@ -585,7 +670,7 @@ TAG = "#EuroLeagueFantasy #EBF"
 # Every post ends by handing the conversation to the reader: a question people have an
 # opinion on, so the replies fill with debate - which is what X rewards with reach.
 DEBATE = {
-    "consistent-by-position": ("Safe floor or too boring? Who did we miss? 👇",
+    "consistent-by-position": ("Safe or boring? Who did we miss? 👇",
                                "רצפה בטוחה או משעמם? מי השחקן היציב ששכחנו? 👇"),
     "hot-hand": ("Ride the hot hand or sell high? Who cools off first? 👇",
                  "רוכבים על הכושר או מוכרים בשיא? מי יתקרר ראשון? 👇"),
@@ -676,8 +761,8 @@ def reddit_draft(rnd, posts, out):
 
 
 def generate(mode, rnd=None, only=None, night=None):
-    """Build one batch. Returns (round, output dir, {id: post}). Each post is also written
-    to <id>.json with its tweets in both languages, <id>.png when it has an image."""
+    """Build one batch. Returns (round, output dir, {id: post}). Each post gets its own
+    folder: post.md (its text in both languages) and <id>.png when it has an image."""
     if not Path(CHROME).exists():
         raise SystemExit(f"Google Chrome not found at {CHROME} - needed to render the images.")
     games = schedule()
@@ -727,23 +812,18 @@ def generate(mode, rnd=None, only=None, night=None):
             continue
         campaign = f"r{rnd:02d}-{post_id}"
         tweets = compose(post_id, card, campaign)
-        post = {"id": post_id, "round": rnd, "mode": mode, "tweets": tweets, "card": card,
-                "image": None, "generated": datetime.now(timezone.utc).isoformat()}
+        folder = out / post_id
+        folder.mkdir(exist_ok=True)
+        post = {"id": post_id, "round": rnd, "mode": mode, "tweets": tweets, "image": None,
+                "title": card.get("title") or post_title(post_id), "folder": folder, "card": card}
         if "body" in card:
-            png = out / f"{post_id}.png"
+            png = folder / f"{post_id}.png"
             render(card, badge, png)
-            post["image"] = str(png)
-        saved = {k: v for k, v in post.items() if k != "card"}
-        (out / f"{post_id}.json").write_text(json.dumps(saved, ensure_ascii=False, indent=2) + "\n")
+            post["image"] = png
+        write_post_md(post)
         made[post_id] = post
 
-    # The README covers the whole folder, so a partial re-run (--only) does not drop the
-    # posts it did not touch.
-    listed = dict(made)
-    for path in sorted(out.glob("*.json")):
-        if path.stem not in listed:
-            listed[path.stem] = json.loads(path.read_text())
-    write_readme(rnd, mode, out, listed, ctx["notes"])
+    write_batch_index(rnd, mode, out, made, ctx["notes"])
     if mode == "post" and not only:
         reddit_draft(rnd, made, out)
     return rnd, out, made, ctx["notes"]
@@ -757,25 +837,74 @@ def tweet_lengths(tweets):
     return max(x_length(t) for t in texts)
 
 
-def write_readme(rnd, mode, out, made, notes):
-    title = {"pre": "preview", "post": "recap", "night": "game night", "live": "live"}[mode]
-    md = [f"# Round {rnd} · {title} posts", f"Generated {datetime.now():%Y-%m-%d %H:%M}.", ""]
-    for post_id, post in made.items():
-        md += [f"## {post_id}"]
-        if post["image"]:
-            md += [f"![{post_id}]({Path(post['image']).name})", ""]
-        for lang in ("en", "he"):
-            t = post["tweets"][lang]
-            md += [f"**{'English' if lang == 'en' else 'Hebrew'}**", ""]
-            parts = t.get("thread") or [t["main"], f"↳ reply: {t['reply']}"]
-            for part in parts:
-                md += ["```", part, "```"]
-            if t.get("poll"):
-                md += [f"Poll ({t['poll']['minutes']} min): " + " / ".join(t["poll"]["options"]), ""]
-        md.append("")
+BATCH_TITLE = {"pre": "preview", "post": "recap", "night": "game night", "live": "live"}
+
+
+def post_title(post_id):
+    return post_id.replace("-", " ").capitalize()
+
+
+def _fence(text):
+    return ["```", text, "```"]
+
+
+def post_text_md(post, lang="en", heading="###"):
+    """The copy-ready parts of one post in one language, as markdown."""
+    t = post["tweets"][lang]
+    md = []
+    if t.get("thread"):
+        md += [f"{heading} Thread - post each part as a reply to the previous one", ""]
+        for n, part in enumerate(t["thread"], 1):
+            md += [f"{n}.", *_fence(part), ""]
+        return md
+    md += [f"{heading} Post", "", *_fence(t["main"]), ""]
+    if t.get("poll"):
+        md += [f"Add a poll in X's composer: **{' / '.join(t['poll']['options'])}** "
+               "(open until the round locks). Polls cannot carry an image.", ""]
+    md += [f"{heading} Then reply to your own post with (the link goes here)", "", *_fence(t["reply"]), ""]
+    return md
+
+
+def _length_note(post):
+    longest = tweet_lengths(post["tweets"])
+    return f"⚠️ {longest} characters - over X's 280 limit, trim before posting." if longest > 280 else None
+
+
+def write_post_md(post, when=None, core=None):
+    """post.md in the post's own folder: everything needed to post it by hand."""
+    md = [f"# {post['title']}", ""]
+    meta = [f"Round {post['round']} · {BATCH_TITLE.get(post['mode'], post['mode'])}"]
+    if when:
+        meta.append(f"post **{when}**")
+    if core:
+        meta.append("★ core post")
+    md += [" · ".join(meta), ""]
+    if post.get("image"):
+        name = Path(post["image"]).name
+        md += [f"Attach: `{name}`", "", f"![{post['id']}]({name})", ""]
+    md += post_text_md(post, "en", "##")
+    if _length_note(post):
+        md += [_length_note(post), ""]
+    md += ["---", "", "## עברית (Hebrew)", ""]
+    md += post_text_md(post, "he", "###")
+    (Path(post["folder"]) / "post.md").write_text("\n".join(md) + "\n")
+
+
+def write_batch_index(rnd, mode, out, made, notes):
+    """POSTS.md for one batch: its posts in catalogue order, English text inline.
+    Folders from earlier runs (a partial --only re-run) are linked, not dropped."""
+    md = [f"# Round {rnd} · {BATCH_TITLE[mode]} posts", f"Generated {datetime.now():%a %d %b, %H:%M}.", ""]
+    for n, post in enumerate(made.values(), 1):
+        md += [f"## {n}. {post['title']}", f"Folder: [`{post['id']}/`]({post['id']}/post.md)", ""]
+        if post.get("image"):
+            md += [f"![{post['id']}]({post['id']}/{Path(post['image']).name})", ""]
+        md += post_text_md(post)
+    others = sorted(d.name for d in out.iterdir() if (d / "post.md").exists() and d.name not in made)
+    if others:
+        md += ["## From earlier runs", *[f"- [{d}]({d}/post.md)" for d in others], ""]
     if notes:
-        md += ["## Notes", *[f"- {n}" for n in notes]]
-    (out / "README.md").write_text("\n".join(md) + "\n")
+        md += ["## Notes", *[f"- {x}" for x in notes]]
+    (out / "POSTS.md").write_text("\n".join(md) + "\n")
 
 
 # --- prepare: everything for right now, and the plan ---------------------------------
@@ -856,59 +985,76 @@ def prepare():
 
 
 def write_plan(items, notes, now):
-    md = ["# What to post", f"Prepared {_local(now)}. Times are your local time.", ""]
-    core = [i for i in items if i[2]]
-    extra = [i for i in items if not i[2]]
-    for title, group in (("Core posts", core), ("Optional (if you have time)", extra)):
-        if not group:
-            continue
-        md += [f"## {title}", ""]
-        for n, (when, post, _, folder) in enumerate(group, 1):
-            t = post["tweets"]["en"]
-            label = "now" if when <= now + timedelta(minutes=30) else _local(when)
-            md += [f"### {n}. {post['id']} - post {label}"]
-            if post.get("image"):
-                md += [f"Image: `{Path(post['image']).relative_to(REPO)}`"]
-            if t.get("thread"):
-                md += ["Thread - post each part as a reply to the previous one:", ""]
-                for part in t["thread"]:
-                    md += ["```", part, "```"]
-            else:
-                md += ["", "Post:", "```", t["main"], "```"]
-                if t.get("poll"):
-                    md += [f"Add a poll with: {' / '.join(t['poll']['options'])} (open until the round locks)", ""]
-                md += ["Then reply to your own post with:", "```", t["reply"], "```"]
-            md += [f"Hebrew version: `{(Path(folder) / (post['id'] + '.json')).relative_to(REPO)}` → tweets.he", ""]
+    """social/POSTS.md: every post that fits now, in posting order - a menu to choose
+    from. Each post's own folder (post.md + image) has the Hebrew version too."""
+    def label(when):
+        return "now" if when <= now + timedelta(minutes=30) else _local(when)
+
+    def rel(path):
+        return Path(path).relative_to(OUT_ROOT).as_posix()
+
+    md = ["# EuroGuru posts", f"Prepared {_local(now)}. Times are your local time. "
+          "★ = core posts; the rest are optional. Pick what you want to post.", "",
+          "| # | When | Post | Image | Folder |", "|---|---|---|---|---|"]
+    for n, (when, post, core, _) in enumerate(items, 1):
+        img = "🖼️" if post.get("image") else ("poll" if post["tweets"]["en"].get("poll") else "text")
+        md.append(f"| {n} | {label(when)} | {'★ ' if core else ''}{post['title']} | {img} "
+                  f"| [{rel(post['folder'])}]({rel(post['folder'])}/post.md) |")
+    md.append("")
+    for n, (when, post, core, _) in enumerate(items, 1):
+        write_post_md(post, label(when), core)
+        md += ["---", "", f"## {n}. {'★ ' if core else ''}{post['title']} - post {label(when)}",
+               f"Folder: [`{rel(post['folder'])}/`]({rel(post['folder'])}/post.md) (Hebrew version in post.md)", ""]
+        if post.get("image"):
+            md += [f"Attach: `{rel(post['image'])}`", "", f"![{post['id']}]({rel(post['image'])})", ""]
+        md += post_text_md(post)
+        if _length_note(post):
+            md += [_length_note(post), ""]
     if notes:
-        md += ["## Notes", *[f"- {n}" for n in notes]]
-    (OUT_ROOT / "PLAN.md").write_text("\n".join(md) + "\n")
+        md += ["---", "", "## Notes", *[f"- {x}" for x in notes]]
+    (OUT_ROOT / "POSTS.md").write_text("\n".join(md) + "\n")
+    (OUT_ROOT / "PLAN.md").unlink(missing_ok=True)  # replaced by POSTS.md
+
+
+def render_page(template, size, png, scale=2):
+    """Render a static brand page (no data) in the post cards' look."""
+    png.parent.mkdir(parents=True, exist_ok=True)
+    page = (SKILL / template).read_text()
+    page = page.replace("{{css}}", (SKILL / "card.css").as_uri()).replace("{{mascot}}", MASCOT.as_uri())
+    tmp = png.parent / f"_{png.stem}.html"
+    tmp.write_text(page)
+    try:
+        subprocess.run([CHROME, "--headless=new", "--disable-gpu", "--hide-scrollbars", f"--force-device-scale-factor={scale}",
+                        f"--window-size={size[0]},{size[1]}", "--virtual-time-budget=3000", "--allow-file-access-from-files",
+                        f"--screenshot={png}", tmp.as_uri()], check=True, capture_output=True, timeout=90)
+    finally:
+        tmp.unlink(missing_ok=True)
+    return png
 
 
 def render_banner():
-    """The X profile banner (1500x500), in the post cards' look."""
-    out = OUT_ROOT / "profile"
-    out.mkdir(parents=True, exist_ok=True)
-    page = (SKILL / "banner.html").read_text()
-    page = page.replace("{{css}}", (SKILL / "card.css").as_uri()).replace("{{mascot}}", MASCOT.as_uri())
-    tmp = out / "_banner.html"
-    tmp.write_text(page)
-    png = out / "banner.png"
-    subprocess.run([CHROME, "--headless=new", "--disable-gpu", "--hide-scrollbars", "--force-device-scale-factor=2",
-                    "--window-size=1500,500", "--virtual-time-budget=3000", "--allow-file-access-from-files",
-                    f"--screenshot={png}", tmp.as_uri()], check=True, capture_output=True, timeout=90)
-    tmp.unlink(missing_ok=True)
-    return png
+    """The X profile banner (1500x500)."""
+    return render_page("banner.html", (1500, 500), OUT_ROOT / "profile" / "banner.png")
+
+
+def render_og():
+    """The site's link preview (og:image), the card under every shared link: exactly
+    1200x630, as index.html declares. Written straight into frontend/public."""
+    return render_page("og.html", (1200, 630), REPO / "frontend" / "public" / "og-image.png", scale=1)
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("mode", choices=["prepare", "pre", "post", "night", "live", "banner"])
+    ap.add_argument("mode", choices=["prepare", "pre", "post", "night", "live", "banner", "og"])
     ap.add_argument("--round", type=int, help="round number (default: chosen from the schedule)")
     ap.add_argument("--date", help="game night date, YYYY-MM-DD (night mode; default today)")
     ap.add_argument("--only", help="comma-separated post ids")
     args = ap.parse_args()
     if args.mode == "banner":
         print(render_banner())
+        return
+    if args.mode == "og":
+        print(render_og())
         return
     if args.mode == "prepare":
         items, notes = prepare()
@@ -918,7 +1064,7 @@ def main():
             print(f"{'★' if core else ' '} {label:22} {post['id']}  (longest tweet {tweet_lengths(post['tweets'])}/280)")
         for note in notes:
             print(f"! {note}")
-        print(f"\nPlan: {(OUT_ROOT / 'PLAN.md').relative_to(REPO)}")
+        print(f"\nAll posts, in order: {(OUT_ROOT / 'POSTS.md').relative_to(REPO)}")
         return
     night = datetime.strptime(args.date, "%Y-%m-%d").date() if args.date else None
     rnd, out, made, notes = generate(args.mode, args.round, set(args.only.split(",")) if args.only else None, night)
@@ -928,7 +1074,7 @@ def main():
         print(f"✓ {post_id} (longest tweet {longest}/280){flag}")
     for note in notes:
         print(f"! {note}")
-    print(f"\n{len(made)} posts in {out.relative_to(REPO)}")
+    print(f"\n{len(made)} posts in {(out / 'POSTS.md').relative_to(REPO)}")
 
 
 if __name__ == "__main__":
