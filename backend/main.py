@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from utils.data_processing import load_and_merge_data, filter_by_cr_and_position, score_metric
 from utils.recommendations import recommend_players_v2
 from utils.cr_history import cr_history_payload
+from utils.defense_vs_position import defense_vs_position_payload
 from utils.auth import optional_user
 
 app = FastAPI(title="EuroGuru API")
@@ -320,6 +321,29 @@ def get_cr_history(season: str = DEFAULT_SEASON):
         raise HTTPException(status_code=404, detail="Season not found")
 
     return cr_history_payload(season)
+
+
+@app.get("/api/defense-vs-position")
+def get_defense_vs_position(
+    season: str = DEFAULT_SEASON,
+    round_number: Optional[int] = Query(None, alias="round"),
+):
+    """
+    The Matchups tab: FPT each team allows to G/F/C, the round's fixtures, the player
+    matchup boost and how the adjustment did on the round's played games.
+
+    Built from defense_vs_position_{season}.csv, which the data run rebuilds - see
+    utils/defense_vs_position.py. `round` defaults to the one in progress (or next);
+    every number for a round comes only from the rounds before it.
+    """
+    df = get_data(season)
+    try:
+        payload = defense_vs_position_payload(season, round_number, df)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Defense vs position is not built for this season yet")
+    if payload is None:
+        raise HTTPException(status_code=400, detail=f"Round {round_number} cannot be shown for {season}")
+    return payload
 
 
 class RecommendationParams(BaseModel):

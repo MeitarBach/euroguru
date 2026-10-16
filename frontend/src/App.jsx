@@ -7,6 +7,7 @@ import StatsView from './components/StatsView';
 import DashboardView from './components/DashboardView';
 import RecommendationsView from './components/RecommendationsView';
 import CourtVisionView from './components/CourtVisionView';
+import MatchupsView from './components/MatchupsView';
 import LiveView from './components/LiveView';
 import { PlayerDetailProvider } from './hooks/usePlayerDetail';
 import { AuthProvider } from './hooks/useAuth';
@@ -59,6 +60,8 @@ function App() {
             {activeTab === 'stats' && <StatsView />}
 
             {activeTab === 'viz' && <CourtVisionView />}
+
+            {activeTab === 'matchups' && <MatchupsView />}
 
             {activeTab === 'recs' && <RecommendationsView />}
           </div>

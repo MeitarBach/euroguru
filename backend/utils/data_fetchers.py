@@ -14,6 +14,10 @@ load_dotenv()
 
 FANTASY_API_BASE = "https://fantaking-api.dunkest.com/api/v1"
 FANTASY_ORIGIN = "https://euroleaguefantasy.euroleaguebasketball.net"
+FANTASY_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36"
+)
 FANTASY_PAGE_SIZE = 100  # the API rejects per_page > 100
 
 # The stats endpoint's `matchdays` filter takes Dunkest's own matchday id, not the
@@ -82,7 +86,31 @@ def _fantasy_headers():
         # The API rejects requests that do not look like they came from the site.
         "origin": FANTASY_ORIGIN,
         "referer": f"{FANTASY_ORIGIN}/",
+        # Since mid-October 2026 it also answers a non-browser User-Agent (requests'
+        # default) with a bare 404 page, for every route - which reads as "wrong
+        # competition", not "blocked". Any browser string gets through.
+        "user-agent": FANTASY_USER_AGENT,
     }
+
+
+def _fantasy_get(url, params=None, max_attempts=6):
+    """
+    GET from the fantasy API, waiting out its rate limit instead of failing on it.
+
+    Since mid-October 2026 it allows 5 requests per window (X-RateLimit-Limit: 5)
+    and answers the sixth with 429. A run needs about a dozen - the matchday lookup,
+    each new round's stats pages, the CR pages - so hitting the limit is the normal
+    case, not an error. A 429 is waited out for as long as Retry-After says (60s if
+    it does not say), then the same request is retried.
+    """
+    for attempt in range(max_attempts):
+        response = requests.get(url, headers=_fantasy_headers(), params=params, timeout=20)
+        if response.status_code != 429:
+            return response
+        wait = min(int(response.headers.get("Retry-After") or 60), 120) + 1
+        print(f"  fantasy API rate limit, waiting {wait}s (attempt {attempt + 1}/{max_attempts})")
+        time.sleep(wait)
+    return response
 
 
 def _fantasy_matchday(competition_id, matchday_id):
@@ -95,7 +123,7 @@ def _fantasy_matchday(competition_id, matchday_id):
     for both.
     """
     url = f"{FANTASY_API_BASE}/schedules/{competition_id}/matchdays/{matchday_id}"
-    response = requests.get(url, headers=_fantasy_headers(), timeout=20)
+    response = _fantasy_get(url)
     if response.status_code == 404:
         return None
     response.raise_for_status()
@@ -153,7 +181,6 @@ def _fetch_fantasy_rows(competition_id, extra_params=None):
     id is carried through as PlayerID, which is what lets stats and CR join
     exactly instead of by name.
     """
-    headers = _fantasy_headers()
     url = f"{FANTASY_API_BASE}/competitions/{competition_id}/stats/players/table"
 
     rows = []
@@ -169,7 +196,7 @@ def _fetch_fantasy_rows(competition_id, extra_params=None):
         }
         params.update(extra_params or {})
 
-        response = requests.get(url, headers=headers, params=params, timeout=20)
+        response = _fantasy_get(url, params)
         if response.status_code == 401:
             raise RuntimeError(
                 "Fantasy API rejected DUNKEST_API_TOKEN (401). The token has expired - "
@@ -713,6 +740,8 @@ def fetch_and_save_schedule(season):
             "HomeCode": (item.findtext("homecode") or "").strip(),
             "AwayTeam": (item.findtext("awayteam") or "").strip(),
             "AwayCode": (item.findtext("awaycode") or "").strip(),
+            # Tip-off as the league lists it (CET/CEST), for the Matchups fixture cards.
+            "StartTime": (item.findtext("startime") or "").strip() or None,
             "Played": (item.findtext("played") or "").strip().lower() == "true",
         })
 
@@ -755,52 +784,3 @@ def fetch_and_save_injury_report():
     save_to_s3(filename, injuries_df)
     print(f"Injury report saved to {filename}")
     return injuries_df
-
-def fetch_and_save_defense_vs_position_data():
-    """
-    Fetch 'defense vs position' data from Dunkest API for Guards, Forwards, and Centers,
-    combine them, and save to S3.
-    """
-    positions = {
-        1: 'Guard',
-        2: 'Forward',
-        3: 'Center'
-    }
-    
-    all_data = []
-
-    for pos_id, pos_name in positions.items():
-        # URL provided by user
-        url = f"https://www.dunkest.com/api/stats/defense-vs-position?season_id=23&stats_id=25&position_id={pos_id}"
-        print(f"Fetching defense data for {pos_name} (ID: {pos_id})...")
-        
-        try:
-            response = requests.get(url, timeout=10)
-            response.raise_for_status()
-            data = response.json()
-            
-            # The API returns a list of objects. We add them to our master list.
-            # We'll attach the position name/id to each row if it's not already there clearly.
-            # However, looking at standard API responses, it's safer to add it explicitly.
-            for row in data:
-                row['Position'] = pos_name
-                row['PositionID'] = pos_id
-                all_data.append(row)
-                
-        except Exception as e:
-            print(f"Error fetching data for {pos_name}: {e}")
-
-    if not all_data:
-        print("No defense vs position data fetched.")
-        return pd.DataFrame()
-
-    df = pd.DataFrame(all_data)
-    
-    # Generate filename with today's date
-    today = datetime.today().strftime("%Y-%m-%d")
-    filename = f"defense_vs_position_{today}.csv"
-
-    save_to_s3(filename, df)
-    print(f"Defense vs Position data saved to {filename} with {len(df)} rows.")
-    return df
-

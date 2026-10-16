@@ -129,6 +129,15 @@ export const fetchCrHistory = (season) =>
         { season, players: [] }
     );
 
+// `round` left out means the round in progress (or the next one); the response says
+// which. Null when the season has no rollup yet, which the tab shows as unavailable.
+export const fetchDefenseVsPosition = (season, round) =>
+    cached(
+        `dvp:${season}:${round ?? 'current'}`,
+        () => client.get(`${API_URL}/defense-vs-position`, { params: { season, round } }),
+        null
+    );
+
 export const fetchRecommendations = (params) =>
     cached(
         `recommend:${JSON.stringify(params)}`,

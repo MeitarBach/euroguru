@@ -9,7 +9,7 @@ import LiveDot from './live/LiveDot';
  * Bottom tab bar, below md only.
  *
  * The desktop sidebar is 260px of a phone's ~390px, so it hides and this takes over.
- * A bottom bar rather than a hamburger because there are only five destinations and
+ * A bottom bar rather than a hamburger because there are only six destinations and
  * they stay one tap away, at the reachable end of the screen.
  *
  * Opaque for the same reason the sidebar is: content scrolls underneath it.

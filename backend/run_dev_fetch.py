@@ -7,11 +7,11 @@ from utils.data_fetchers import (
     fetch_and_update_fantasy_stats,
     fetch_and_update_player_stats,
     fetch_and_save_injury_report,
-    fetch_and_save_defense_vs_position_data,
     fetch_and_save_schedule,
     latest_round,
 )
 from utils.cr_history import rebuild_cr_history
+from utils.defense_vs_position import rebuild_defense_vs_position
 
 # The season the nightly fetch keeps up to date, and what every flag here assumes
 # when none is given. Named rather than repeated so the stats files, the schedule and
@@ -192,12 +192,16 @@ def run_fetch():
     except Exception as e:
         print(f"Error fetching Injury Report: {e}")
 
-    print("\n--- Fetching Defense vs Position ---")
+    # Derived from everything above - position comes from the CR merge, the opponent
+    # from the schedule - so it has to run last. Safe to re-run; it only rewrites
+    # defense_vs_position_{season}.csv.
+    print("\n--- Rebuilding Defense vs Position ---")
     try:
-        fetch_and_save_defense_vs_position_data()
-        print("Defense vs Position fetched successfully.")
+        from main import DATA_FILES
+        rebuild_defense_vs_position(CURRENT_SEASON, DATA_FILES[CURRENT_SEASON])
+        print("Defense vs Position rebuilt successfully.")
     except Exception as e:
-        print(f"Error fetching Defense vs Position: {e}")
+        print(f"Error rebuilding Defense vs Position: {e}")
 
     print("\nAll tasks completed.")
     return 0 if cr_ok else 1
