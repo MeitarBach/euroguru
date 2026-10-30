@@ -125,6 +125,7 @@ export default function CourtVisionView() {
             min_cr: locked ? view.min_cr : minCr,
             max_cr: locked ? view.max_cr : maxCr,
             last_x_games: games,
+            regulars_only: true,
         }).then(data => {
             done = true;
             if (seq !== requestSeq.current) return;

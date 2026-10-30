@@ -248,9 +248,11 @@ def dvp_payload(season, round_number, merged_df, rollup, schedule):
     team_index = {t["code"]: t for t in teams}
 
     # --- player matchup boost
-    from .data_processing import calculate_player_averages
+    from .data_processing import calculate_player_averages, regular_players
 
     avgs = calculate_player_averages(before, 100) if not before.empty else pd.DataFrame()
+    # The app-wide bar too: more than half of his club's games before this round.
+    regulars = regular_players(before) if not before.empty else set()
     actual_player = played[played["Round"] == R].groupby("PlayerName")["Score"].sum()
     played_teams = {t for fx in fixtures if fx["played"] for t in (fx["home"], fx["away"])}
     picks = []
@@ -258,7 +260,8 @@ def dvp_payload(season, round_number, merged_df, rollup, schedule):
         team, p = getattr(a, "TeamCode", None), a.position
         if team not in opponent or p not in POSITIONS or opponent[team] not in team_index:
             continue
-        if (a.GamesPlayed or 0) < MIN_GAMES or (a.Average_Minutes or 0) < MIN_MINUTES:
+        if (a.GamesPlayed or 0) < MIN_GAMES or (a.Average_Minutes or 0) < MIN_MINUTES \
+                or a.PlayerName not in regulars:
             continue
         f = factor[(opponent[team], p)]
         avg = float(a.Average_Score or 0)

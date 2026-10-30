@@ -179,7 +179,10 @@ export default function StatsView() {
             position: view.position,
             min_cr: locked ? view.min_cr : minCr,
             max_cr: locked ? view.max_cr : maxCr,
-            last_x_games: games
+            last_x_games: games,
+            // Only players with more than half of their club's games: one big night
+            // should not top the table.
+            regulars_only: true,
         };
 
         const data = await fetchStats(params);

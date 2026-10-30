@@ -1090,6 +1090,53 @@ def filter_by_cr_and_position(df, min_cr, max_cr, position):
         df = df[df['position'] == position]
     return df[(df['CR'] >= min_cr) & (df['CR'] <= max_cr)]
 
+
+def regular_players(df):
+    """
+    The players who have played more than half of their club's games: the bar for
+    being ranked or recommended anywhere in the app.
+
+    Without it one big night tops every per-CR list on a sample of one - E. Jackson,
+    14.0 FPT at 4.3 CR from a single game of nine, led the 2026 budget rankings after
+    Round 9. Measured against the player's own club rather than the league's rounds,
+    so a round in progress (some clubs on 9 games, some on 8) asks the same of
+    everyone. The club is the one of his latest game, which is the one that counts
+    after a mid-season transfer.
+
+    Pass the whole season's frame, not a CR- or position-filtered slice: the club's
+    game count has to see every game the club played.
+    """
+    if df.empty or "GameCode" not in df.columns:
+        return set()
+    club = "TeamCode" if "TeamCode" in df.columns else "Team"
+    played = df[df["GameCode"].notna()]
+    if played.empty:
+        return set()
+
+    club_games = played.groupby(club)["GameCode"].nunique()
+    per_player = (
+        played.sort_values("GameCode")
+              .groupby("PlayerName")
+              .agg(club=(club, "last"), games=("GameCode", "nunique"))
+    )
+    # A row with no club code would otherwise fail every player it touches; measure
+    # him against the busiest club instead, the strictest fair bar.
+    needed = per_player["club"].map(club_games).fillna(club_games.max())
+    return set(per_player.index[per_player["games"] * 2 > needed])
+
+
+def only_regulars(df, season_df=None):
+    """
+    `df` without the players regular_players() leaves out of `season_df` (default `df`).
+
+    Unchanged before the first tip-off: with no games there is no half to clear, and
+    the tabs' own "season not started" states need the priced rows to see that.
+    """
+    season_df = df if season_df is None else season_df
+    if "GameCode" not in season_df.columns or season_df["GameCode"].notna().sum() == 0:
+        return df
+    return df[df["PlayerName"].isin(regular_players(season_df))]
+
 # def calculate_pir_stats(df, last_x_games):
 #     """
 #     Calculate average PIR and standard deviation for each player

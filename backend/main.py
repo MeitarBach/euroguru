@@ -6,7 +6,7 @@ import os
 from pydantic import BaseModel
 
 # Import utils (ensure these are refactored to remove streamlit dependency)
-from utils.data_processing import load_and_merge_data, filter_by_cr_and_position, score_metric
+from utils.data_processing import load_and_merge_data, filter_by_cr_and_position, score_metric, only_regulars
 from utils.recommendations import recommend_players_v2
 from utils.cr_history import cr_history_payload
 from utils.defense_vs_position import defense_vs_position_payload
@@ -222,6 +222,10 @@ class FilterParams(BaseModel):
     max_cr: float
     position: str
     last_x_games: Optional[int] = 0 # 0 means "All/Raw" mode? Or actually "Raw". Let's say 0 = Raw.
+    # Only players who have played more than half of their club's games (see
+    # regular_players). Off by default: the Live tab and the social scripts need the
+    # whole roster; the Player Stats and Court Vision tabs ask for it.
+    regulars_only: bool = False
 
 @app.post("/api/stats")
 def get_stats(params: FilterParams):
@@ -232,6 +236,8 @@ def get_stats(params: FilterParams):
         return []
         
     filtered = filter_by_cr_and_position(df, params.min_cr, params.max_cr, params.position)
+    if params.regulars_only:
+        filtered = only_regulars(filtered, df)
     
     # If user requests aggregation (e.g. Last 5 Games)
     if params.last_x_games and params.last_x_games > 0:
@@ -257,6 +263,8 @@ def get_aggregated_stats(params: FilterParams):
     
     # 1. First calculate stats on the WHOLE dataset (or filtered by position? usually filtered)
     filtered = filter_by_cr_and_position(df, params.min_cr, params.max_cr, params.position)
+    if params.regulars_only:
+        filtered = only_regulars(filtered, df)
     
     if filtered.empty:
         return []
@@ -385,6 +393,8 @@ def get_recommendations(params: RecommendationParams):
     # so the top 20 are the best at that position rather than whichever of the
     # overall top 20 happen to play it.
     filtered_df = filter_by_cr_and_position(df, params.min_cr, params.max_cr, params.position).copy()
+    # Never recommend a player on a handful of games: more than half of his club's.
+    filtered_df = only_regulars(filtered_df, df)
 
     recs = recommend_players_v2(
         filtered_df,
@@ -447,6 +457,7 @@ def get_dashboard_data(season: str = DEFAULT_SEASON):
     # Every widget is a buy recommendation, so restrict to players who are actually
     # priced this season. Archive seasons are full of players no longer in the league,
     # and without this they top the leaderboards with a blank position and no cost.
+    season_df = df
     df = df[df["CR"].notna()]
     if df.empty:
         return {"widgets": {}, "injuries": []}
@@ -474,6 +485,12 @@ def get_dashboard_data(season: str = DEFAULT_SEASON):
             "score_metric": score_metric(df),
             "games_recorded": 0,
         }
+
+    # Only players who have played more than half of their club's games, or one big
+    # night tops Who's Hot and Budget Picks. Measured on the whole season's frame.
+    df = only_regulars(df, season_df)
+    if df.empty:
+        return {"widgets": {}, "injuries": []}
 
     # --- Widget 1: "Who's Hot 🔥" (Last 3 Games) ---
     stats_hot = calculate_pir_stats(df, last_x_games=3)
