@@ -1,12 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Radio, UserPlus, Volume2, VolumeX, FlaskConical, Plus, RefreshCw, Lock, Unlock, LogIn, Shirt } from 'lucide-react';
-import { fetchStats, fetchCoaches } from '../services/api';
+import { fetchStats, fetchCoaches, fetchHeadshots } from '../services/api';
 import { CURRENT_SEASON } from '../seasons';
 import useWatchGroups, { GROUP_COLORS } from '../hooks/useWatchGroups';
 import useTeams from '../hooks/useTeams';
 import useRoundLock from '../hooks/useRoundLock';
 import useLeagues from '../hooks/useLeagues';
 import LeagueView, { LeaguesGate, JoinLeagueDialog } from './live/LeagueView';
+import TeamCourt from './live/TeamCourt';
+import ViewSwitch from './live/ViewSwitch';
 import { useAuth } from '../hooks/authContext';
 import { TEAM_LIMIT, STARTERS, BENCH, readLeagueCode } from '../lib/leagues';
 import useLiveRound from '../hooks/useLiveRound';
@@ -39,6 +41,15 @@ const SOUND_KEY = 'euroguru.liveSound';
 // Which list the tab shows - your teams or your watchlists - remembered per device.
 const MODE_KEY = 'euroguru.liveMode';
 const MODES = [['teams', 'My teams'], ['leagues', 'Leagues'], ['watchlists', 'Watchlists']];
+// How a team is drawn: on a half court with photos, or as the detailed stat cards.
+const VIEW_KEY = 'euroguru.liveTeamView';
+const loadView = () => {
+    try {
+        return window.localStorage.getItem(VIEW_KEY) === 'cards' ? 'cards' : 'court';
+    } catch {
+        return 'court';
+    }
+};
 const BIG_PLAY = 3;
 // Euroleague's edge holds an answer for up to a minute; much older than that while a
 // game is on means their feed has stalled, which is worth saying out loud.
@@ -358,6 +369,14 @@ export default function LiveView() {
     const [source] = useState(() => (demo ? demoSource(SEASON_CODE) : euroleagueSource(SEASON_CODE)));
     const [roster, setRoster] = useState(null);
     const [coaches, setCoaches] = useState([]);
+    const [headshots, setHeadshots] = useState({ players: {}, crests: {} });
+    const [teamView, setTeamView] = useState(loadView);
+    const changeTeamView = (next) => {
+        setTeamView(next);
+        try {
+            window.localStorage.setItem(VIEW_KEY, next);
+        } catch { /* the choice just lasts this visit */ }
+    };
     const [coachPicker, setCoachPicker] = useState(false);
     const [picker, setPicker] = useState({ open: false, game: null });
     // The game open in the game view, by code - its boxscore is polled while it is.
@@ -424,6 +443,7 @@ export default function LiveView() {
         let alive = true;
         fetchStats(ROSTER_QUERY).then(rows => { if (alive) setRoster(rows ?? []); });
         fetchCoaches(CURRENT_SEASON).then(rows => { if (alive) setCoaches(Array.isArray(rows) ? rows : []); });
+        fetchHeadshots(CURRENT_SEASON).then(map => { if (alive && map?.players) setHeadshots(map); });
         return () => { alive = false; };
     }, []);
     const coachByKey = useMemo(() => new Map(coaches.map(c => [coachKey(c), c])), [coaches]);
@@ -723,6 +743,10 @@ export default function LiveView() {
                                 lastEvent={lastEvent}
                                 onOpenPlayer={(name) => openPlayer(name, CURRENT_SEASON)}
                                 flash={flash}
+                                view={teamView}
+                                onChangeView={changeTeamView}
+                                photos={headshots.players}
+                                crests={headshots.crests}
                             />
                         ) : (
                         <section className="xl:col-span-2 space-y-3">
@@ -736,6 +760,11 @@ export default function LiveView() {
                                 onShare={isTeams ? null : () => shareGroup(group, live.round).then(flash)}
                                 onDelete={() => watch.destroy(group.id)}
                             />
+                            {isTeams && group.rows.length > 0 && (
+                                <div className="flex justify-end">
+                                    <ViewSwitch view={teamView} onChange={changeTeamView} />
+                                </div>
+                            )}
                             {group.rows.length === 0 ? (
                                 <EmptyState
                                     group={group}
@@ -744,6 +773,33 @@ export default function LiveView() {
                                     onAdd={(key) => watch.add(group.id, key)}
                                     onPick={() => openPicker()}
                                 />
+                            ) : isTeams && teamView === 'court' ? (
+                                <div className="relative">
+                                    <TeamCourt
+                                        group={group}
+                                        photos={headshots.players}
+                                        crests={headshots.crests}
+                                        now={now}
+                                        lastEvent={lastEvent}
+                                        editable={!lock.locked}
+                                        onToggleCaptain={(key) => watch.toggleCaptain(group.id, key)}
+                                        onToggleBench={(key) => watch.toggleBench(group.id, key)}
+                                        onRemove={(key) => watch.remove(group.id, key)}
+                                        onOpenPlayer={(name) => openPlayer(name, CURRENT_SEASON)}
+                                        onAddPlayers={() => openPicker()}
+                                        onPickCoach={() => setCoachPicker(id => (id === group.id ? false : group.id))}
+                                    />
+                                    {coachPicker === group.id && (
+                                        <CoachPicker
+                                            coaches={coaches}
+                                            games={live.games}
+                                            selectedKey={group.coachRow?.key ?? null}
+                                            now={now}
+                                            onPick={(key) => { watch.toggleCoach(group.id, key); closeCoachPicker(); }}
+                                            onClose={closeCoachPicker}
+                                        />
+                                    )}
+                                </div>
                             ) : (
                                 <LayoutGroup id={group.id}>
                                     {[
@@ -780,7 +836,7 @@ export default function LiveView() {
                                     ))}
                                 </LayoutGroup>
                             )}
-                            <CoachSlot
+                            {!(isTeams && teamView === 'court' && group.rows.length > 0) && <CoachSlot
                                 group={group}
                                 coaches={coaches}
                                 games={live.games}
@@ -791,7 +847,7 @@ export default function LiveView() {
                                 onTogglePicker={() => setCoachPicker(id => (id === group.id ? false : group.id))}
                                 onClosePicker={closeCoachPicker}
                                 onPick={(key) => watch.toggleCoach(group.id, key)}
-                            />
+                            />}
                         </section>
                         )}
 

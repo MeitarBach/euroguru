@@ -138,6 +138,15 @@ export const fetchDefenseVsPosition = (season, round) =>
         null
     );
 
+// Official photos for the court view: { players: { PlayerKey: url }, crests: { club: url } }.
+// Empty maps when EuroLeague's rosters are unreachable; the court shows initials then.
+export const fetchHeadshots = (season) =>
+    cached(
+        `headshots:${season}`,
+        () => client.get(`${API_URL}/headshots`, { params: { season } }),
+        { players: {}, crests: {} }
+    );
+
 // The season's head coaches (name, club, CR) for the Live tab's coach slot. Empty when
 // the data run has not written them yet; the slot just has nobody to offer.
 export const fetchCoaches = (season) =>

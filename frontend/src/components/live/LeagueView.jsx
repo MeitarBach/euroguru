@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { Trophy, Link2, Pencil, Trash2, RefreshCw, Plus, LogIn, LogOut, Lock, X, Check, UserMinus } from 'lucide-react';
 import WatchCard from './WatchCard';
 import CoachCard from './CoachCard';
+import TeamCourt from './TeamCourt';
+import ViewSwitch from './ViewSwitch';
 import { countdown, decimalsFor } from '../../lib/live/format';
 import { leagueLink, LEAGUE_LIMIT } from '../../lib/leagues';
 
@@ -152,6 +154,7 @@ export function JoinLeagueDialog({ invite, myTeams, onCreateTeam, onJoin, onClos
 /** The open league: its name and link, your place in it, and the chosen team's lineup. */
 export default function LeagueView({
     leagues, myTeams, groups, team, onSelectTeam, lock, now, history, lastEvent, onOpenPlayer, flash,
+    view = 'court', onChangeView, photos, crests,
 }) {
     const [editing, setEditing] = useState(null); // 'league' | 'nickname' | 'new'
     const [confirm, setConfirm] = useState(null); // 'delete' | 'reset' | team id to remove
@@ -334,6 +337,11 @@ export default function LeagueView({
                         ))}
                     </div>
 
+                    {revealed && onChangeView && (
+                        <div className="flex justify-end">
+                            <ViewSwitch view={view} onChange={onChangeView} />
+                        </div>
+                    )}
                     {!revealed ? (
                         <div className="glass-panel p-6 text-center">
                             <Lock size={20} className="mx-auto text-gray-500" />
@@ -344,6 +352,15 @@ export default function LeagueView({
                             </p>
                             {team.mine && <p className="mt-1 text-xs text-gray-500">Yours is in My teams until then.</p>}
                         </div>
+                    ) : view === 'court' ? (
+                        <TeamCourt
+                            group={team}
+                            photos={photos}
+                            crests={crests}
+                            now={now}
+                            lastEvent={lastEvent}
+                            onOpenPlayer={onOpenPlayer}
+                        />
                     ) : (
                         <>
                             {[['Starters', team.rows.filter(r => !r.benched), null], ['Bench', team.rows.filter(r => r.benched), 'count half']]

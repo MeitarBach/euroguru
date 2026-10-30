@@ -11,6 +11,7 @@ from utils.recommendations import recommend_players_v2
 from utils.cr_history import cr_history_payload
 from utils.defense_vs_position import defense_vs_position_payload
 from utils.coaches import coaches_payload
+from utils.headshots import headshots_payload
 from utils.auth import optional_user
 
 app = FastAPI(title="EuroGuru API")
@@ -353,6 +354,16 @@ def get_defense_vs_position(
     if payload is None:
         raise HTTPException(status_code=400, detail=f"Round {round_number} cannot be shown for {season}")
     return payload
+
+
+@app.get("/api/headshots")
+def get_headshots(season: str = DEFAULT_SEASON):
+    """
+    Official photos for the Live tab's court view: {players: {PlayerKey: url}, crests:
+    {club: url}}. Matched from EuroLeague's rosters - see utils/headshots.py, which keeps
+    the answer for half a day; edge_cache above covers the CDN side like every route.
+    """
+    return headshots_payload(season, get_data(season))
 
 
 @app.get("/api/coaches")
