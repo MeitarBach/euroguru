@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from './authContext';
 import {
-    listLeagues, createLeague, renameLeague, deleteLeague, leagueBoard, leaguePreview,
+    listLeagues, createLeague, renameLeague, setOpenLineups, deleteLeague, leagueBoard, leaguePreview,
     joinLeague, resetInvite, removeFromLeague, getNickname, saveNickname,
     readLeagueCode, clearLeagueCode,
 } from '../lib/leagues';
@@ -30,7 +30,7 @@ function firstNameOf(user) {
  * The leagues you run or have a team in, the open one's board, and every league action.
  *
  * Visibility is the database's job (league_board only shows rivals' lineups as saved
- * at the lock), so this just loads, refreshes and reports. Actions resolve to true on
+ * at the lock, unless the admin opened them), so this just loads, refreshes and reports. Actions resolve to true on
  * success and report failures through `notify`.
  *
  * Also owns the two bits of league state that are about you rather than a league:
@@ -161,6 +161,11 @@ export default function useLeagues({ season, notify } = {}) {
         () => { reload(); refreshBoard(); },
     ), [act, reload, refreshBoard]);
 
+    const setOpen = useCallback((id, open) => act(
+        () => setOpenLineups(id, open),
+        () => refreshBoard(),
+    ), [act, refreshBoard]);
+
     const destroy = useCallback((id) => act(() => deleteLeague(id), () => { setBoard(null); reload(); }), [act, reload]);
 
     const newInvite = useCallback((id) => act(() => resetInvite(id), () => refreshBoard()), [act, refreshBoard]);
@@ -184,6 +189,6 @@ export default function useLeagues({ season, notify } = {}) {
         board: shownBoard, refreshBoard,
         nickname, changeNickname,
         inviteCode, invite, dismissInvite, join,
-        create, rename, destroy, newInvite, removeTeam, addTeam,
+        create, rename, setOpen, destroy, newInvite, removeTeam, addTeam,
     };
 }

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Trophy, Link2, Pencil, Trash2, RefreshCw, Plus, LogIn, LogOut, Lock, X, Check, UserMinus } from 'lucide-react';
+import { Trophy, Link2, Pencil, Trash2, RefreshCw, Plus, LogIn, LogOut, Lock, X, Check, UserMinus, Eye, EyeOff } from 'lucide-react';
 import WatchCard from './WatchCard';
 import CoachCard from './CoachCard';
 import TeamCourt from './TeamCourt';
@@ -168,6 +168,7 @@ export default function LeagueView({
     const canAdd = myTeams.filter(t => !inLeague.has(t.id));
     const round = board?.round;
     const revealed = Boolean(team?.lineupSaved);
+    const open = Boolean(board?.open_lineups);
 
     const copyLink = async () => {
         if (!board?.invite_code) return;
@@ -300,6 +301,24 @@ export default function LeagueView({
                             </button>
                         </span>
                     ))}
+                    {isAdmin ? (
+                        <button
+                            type="button"
+                            onClick={() => leagues.setOpen(league.id, !open)}
+                            aria-pressed={open}
+                            title={open
+                                ? 'Everyone sees every lineup now - click to hide them until each lock'
+                                : 'Let everyone see every lineup, any time - not only at the lock'}
+                            className={`${btn} border ${open
+                                ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+                                : 'border-white/10 text-gray-400 hover:text-white'}`}
+                        >
+                            {open ? <Eye size={12} /> : <EyeOff size={12} />}
+                            {open ? 'Lineups open' : 'Lineups hidden till lock'}
+                        </button>
+                    ) : open && (
+                        <span className="inline-flex items-center gap-1 text-emerald-300"><Eye size={12} /> Lineups open</span>
+                    )}
                     {canAdd.length > 0 && groups.length < LEAGUE_LIMIT && (
                         <select
                             value=""

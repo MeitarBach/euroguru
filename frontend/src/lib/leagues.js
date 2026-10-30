@@ -90,9 +90,14 @@ export const createLeague = (name, season) =>
 export const renameLeague = (id, name) =>
     run(db.from('leagues').update({ name }).eq('id', id).select('id, name').single());
 
+/** Open lineups: every team's current lineup shows to the league, not only at the lock. */
+export const setOpenLineups = (id, open) =>
+    run(db.from('leagues').update({ open_lineups: open }).eq('id', id).select('id, open_lineups').single());
+
 export const deleteLeague = (id) => run(db.from('leagues').delete().eq('id', id));
 
-/** Names and nicknames always; lineups only as saved at the lock of the latest round. */
+/** Names and nicknames always; lineups as saved at the latest round's lock - or, in a
+ * league with open lineups, as they are now. */
 export const leagueBoard = (id) => run(db.rpc('league_board', { lid: id }));
 
 /** What an invite shows before joining, or null for a code that no longer works. */
