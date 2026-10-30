@@ -76,6 +76,16 @@ python promote.py --yes
   `--allow-shrink` or `--skip-checks` unless the user asks for it.
 - "prod is already up to date" is a fine outcome - nothing to copy.
 
+## 4b. Round locks for teams and leagues (after a promote)
+Teams' lineups lock per round in Supabase (`public.rounds`, see
+`supabase/migrations/*_teams_and_leagues.sql`). After a promote, refresh the windows from
+the schedule - a postponed game moves one:
+```bash
+python -m utils.rounds 2026 > /tmp/rounds.sql   # from backend/, with the environment
+```
+Apply the printed upsert with the Supabase MCP `execute_sql` (project
+`iijewijzcnjjjlasupho`). It inserts new rounds and moves changed ones; nothing else.
+
 ## 5. Confirm prod and wrap up
 `GET https://euroguru-api.vercel.app/api/player?name=<TOP_SCORER>&season=2026` must list
 `TOP_ROUND` (retry once after a minute if not). Then a short summary: games added, rounds,
