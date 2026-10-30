@@ -506,7 +506,9 @@ export default function LiveView() {
     // half - with the captain pinned to the top of the starters.
     const scoreGroups = useCallback((list) => list.map(g => {
         const bench = new Set(g.bench);
-        const roleOf = (key) => (g.captain === key ? 'captain' : bench.has(key) ? 'bench' : 'starter');
+        // The first on the bench is the sixth man, who counts in full.
+        const roleOf = (key) => (g.captain === key ? 'captain'
+            : g.bench[0] === key ? 'sixth' : bench.has(key) ? 'bench' : 'starter');
         const sorted = sortRows(g.keys.map(k => rowByKey.get(k)).filter(Boolean).map(r => inGroup(r, roleOf(r.key))));
         const rows = [...sorted.filter(r => r.captain), ...sorted.filter(r => !r.captain)];
         const coach = coachByKey.get(g.coach);
@@ -784,6 +786,7 @@ export default function LiveView() {
                                         editable={!lock.locked}
                                         onToggleCaptain={(key) => watch.toggleCaptain(group.id, key)}
                                         onToggleBench={(key) => watch.toggleBench(group.id, key)}
+                                        onMakeSixth={(key) => watch.makeSixth(group.id, key)}
                                         onRemove={(key) => watch.remove(group.id, key)}
                                         onOpenPlayer={(name) => openPlayer(name, CURRENT_SEASON)}
                                         onAddPlayers={() => openPicker()}
@@ -804,7 +807,8 @@ export default function LiveView() {
                                 <LayoutGroup id={group.id}>
                                     {[
                                         ['Starters', group.rows.filter(r => !r.benched), null],
-                                        ['Bench', group.rows.filter(r => r.benched), 'count half'],
+                                        ['6th man', group.rows.filter(r => r.sixth), 'counts in full'],
+                                        ['Bench', group.rows.filter(r => r.benched && !r.sixth), 'count half'],
                                     ].filter(([, rows], i) => i === 0 || rows.length).map(([title, rows, note]) => (
                                         <div key={title} className="space-y-2">
                                             <div className="flex items-baseline justify-between px-1 text-[11px] uppercase tracking-wider text-gray-500 font-semibold">

@@ -363,7 +363,9 @@ export default function LeagueView({
                         />
                     ) : (
                         <>
-                            {[['Starters', team.rows.filter(r => !r.benched), null], ['Bench', team.rows.filter(r => r.benched), 'count half']]
+                            {[['Starters', team.rows.filter(r => !r.benched), null],
+                                ['6th man', team.rows.filter(r => r.sixth), 'counts in full'],
+                                ['Bench', team.rows.filter(r => r.benched && !r.sixth), 'count half']]
                                 .filter(([, rows], i) => i === 0 || rows.length)
                                 .map(([title, rows, note]) => (
                                     <div key={title} className="space-y-2">

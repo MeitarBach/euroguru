@@ -101,23 +101,25 @@ const PLACEHOLDER = {
 };
 
 /**
- * The player's role in this group: Starter / Bench ½, and for a starter the captain's
- * armband - a bench player counts half, the captain double.
+ * The player's role in this group: Starter / 6th man / Bench ½, and for a starter the
+ * captain's armband - the captain counts double, the sixth man (first on the bench) in
+ * full, the rest of the bench half.
  */
-function RoleControls({ benched, captain, onToggleBench, onToggleCaptain }) {
+function RoleControls({ benched, sixth, captain, onToggleBench, onToggleCaptain }) {
     return (
         <span className="flex items-center gap-1 shrink-0">
             <button
                 type="button"
                 onClick={onToggleBench}
                 aria-pressed={benched}
-                title={benched ? 'On the bench: counts half. Tap to make a starter.' : 'Starter. Tap if on the bench (counts half).'}
+                title={sixth ? 'Sixth man: first on the bench, counts in full. Tap to make a starter.'
+                    : benched ? 'On the bench: counts half. Tap to make a starter.' : 'Starter. Tap if on the bench (counts half).'}
                 className={`px-1.5 py-0.5 rounded text-[10px] font-semibold leading-none border transition-colors
                     ${benched
                         ? 'bg-sky-500/10 text-sky-300 border-sky-500/30 hover:bg-sky-500/20'
                         : 'text-gray-500 border-white/10 hover:text-gray-200 hover:border-white/20'}`}
             >
-                {benched ? 'Bench ½' : 'Starter'}
+                {sixth ? '6th man' : benched ? 'Bench ½' : 'Starter'}
             </button>
             {!benched && (
                 <button
@@ -228,7 +230,7 @@ export default function WatchCard({
                             value={counted}
                             decimals={decimalsFor(counted)}
                             className={`block text-2xl leading-none font-bold font-mono ${
-                                counted < 0 ? 'text-red-300' : captain ? 'text-yellow-200' : benched ? 'text-gray-300' : 'text-white'}`}
+                                counted < 0 ? 'text-red-300' : captain ? 'text-yellow-200' : factor === 0.5 ? 'text-gray-300' : 'text-white'}`}
                         />
                     ) : (
                         <span className="block text-2xl leading-none font-bold font-mono text-gray-700">–</span>
@@ -239,7 +241,7 @@ export default function WatchCard({
                         {!pending && !bonus && (score === null
                             ? (row.countedAvg !== null ? `avg ${fixed(Math.round(row.countedAvg * 100) / 100)}` : '')
                             : captain ? <span className="text-yellow-300/80">×2 of {score.toFixed(1)}</span>
-                                : benched ? <span className="text-sky-300/80">½ of {score.toFixed(1)}</span> : 'FPT')}
+                                : factor === 0.5 ? <span className="text-sky-300/80">½ of {score.toFixed(1)}</span> : 'FPT')}
                     </span>
                 </div>
 
@@ -260,6 +262,7 @@ export default function WatchCard({
                             {onToggleBench ? (
                                 <RoleControls
                                     benched={benched}
+                                    sixth={row.sixth}
                                     captain={captain}
                                     onToggleBench={onToggleBench}
                                     onToggleCaptain={onToggleCaptain}
@@ -285,6 +288,7 @@ export default function WatchCard({
                     {onToggleBench && (
                         <RoleControls
                             benched={benched}
+                            sixth={row.sixth}
                             captain={captain}
                             onToggleBench={onToggleBench}
                             onToggleCaptain={onToggleCaptain}

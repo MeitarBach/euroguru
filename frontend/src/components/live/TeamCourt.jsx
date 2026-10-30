@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Crown, ArrowDownUp, X, UserRound } from 'lucide-react';
+import { Plus, Crown, ArrowDownUp, X, UserRound, ChevronsLeft } from 'lucide-react';
 import AnimatedNumber from './AnimatedNumber';
 import LiveDot from './LiveDot';
 import { GameNote } from './WatchCard';
@@ -17,7 +17,9 @@ const H = 760;
 const S = W / 15; // px per metre
 // Where each position's starters stand, basket end first, as a share of the floor's
 // height; and the spread of a row of 1-5 players, as a share of its width.
-const ROW_TOP = { C: 132 / H, F: 338 / H, G: 530 / H };
+// A figure (photo + plate) is ~210 of the floor's 760 high, so the rows sit far enough
+// apart that a guard's head never reaches the plate of the forward in front of him.
+const ROW_TOP = { C: 96 / H, F: 312 / H, G: 534 / H };
 const SPREAD = {
     1: [0], 2: [-0.175, 0.175], 3: [-0.303, 0, 0.303],
     4: [-0.375, -0.125, 0.125, 0.375], 5: [-0.4, -0.2, 0, 0.2, 0.4],
@@ -117,6 +119,11 @@ function PlayerMenu({ row, onAction, onClose }) {
                         <Crown size={14} /> {row.captain ? 'Take the armband' : 'Make captain'}
                     </button>
                 )}
+                {row.benched && !row.sixth && (
+                    <button type="button" className={`${item} text-emerald-200`} onClick={() => onAction('sixth')}>
+                        <ChevronsLeft size={14} /> Make 6th man
+                    </button>
+                )}
                 <button type="button" className={`${item} text-gray-200`} onClick={() => onAction('bench')}>
                     <ArrowDownUp size={14} /> {row.benched ? 'Start him' : 'To the bench'}
                 </button>
@@ -177,15 +184,18 @@ function Starter({ row, photo, left, top, width, now, lastEvent, menuOpen, onTap
     );
 }
 
-/** A tile under the court: a bench player (counts half), the coach, or an empty spot. */
+/**
+ * A tile under the court - the sixth man, a bench player, the coach or an empty spot -
+ * all one size, so the row reads as a row whatever is in it.
+ */
 function Tile({ children, tone = '', onClick, dashed }) {
     return (
         <button
             type="button"
             onClick={onClick}
             disabled={!onClick}
-            className={`relative overflow-hidden rounded-2xl text-center px-1.5 pb-2 border transition-colors
-                ${dashed ? 'border-dashed border-white/15 text-gray-500 hover:text-white hover:border-violet-400/50 flex flex-col items-center justify-center min-h-[120px]'
+            className={`relative h-[168px] w-full overflow-hidden rounded-2xl text-center px-1.5 pb-2 border transition-colors flex flex-col items-center
+                ${dashed ? 'justify-center border-dashed border-white/15 text-gray-500 hover:text-white hover:border-violet-400/50'
                     : `bg-white/[0.045] border-white/[0.08] ${onClick ? 'hover:border-violet-400/40' : ''} ${tone}`}`}
         >
             {children}
@@ -193,10 +203,13 @@ function Tile({ children, tone = '', onClick, dashed }) {
     );
 }
 
+/** The photo area every tile shares: the same height whether it holds a face or a crest. */
+const TILE_PHOTO = 'relative w-full h-[84px] shrink-0';
+
 /**
  * A fantasy team on a half court, like the team optimizer's card: the starting five on
- * the floor by position, each with their photo, the captain in gold; the bench (x0.5)
- * and the coach in a row underneath. Every number is live - the counted FPT of the
+ * the floor by position, each with their photo, the captain in gold; under it the
+ * sixth man (first on the bench, x1), the rest of the bench (x0.5) and the coach. Every number is live - the counted FPT of the
  * row as the group scores it.
  *
  * `editable` turns a tap into a menu (captain, bench, remove) and shows empty spots to
@@ -206,11 +219,12 @@ function Tile({ children, tone = '', onClick, dashed }) {
  */
 export default function TeamCourt({
     group, photos = {}, crests = {}, now, lastEvent, editable = false,
-    onToggleCaptain, onToggleBench, onRemove, onOpenPlayer, onAddPlayers, onPickCoach,
+    onToggleCaptain, onToggleBench, onMakeSixth, onRemove, onOpenPlayer, onAddPlayers, onPickCoach,
 }) {
     const [menu, setMenu] = useState(null);
     const starters = group.rows.filter(r => !r.benched);
-    const bench = group.rows.filter(r => r.benched);
+    // In the lineup's own order: the first is the sixth man, who counts in full.
+    const bench = group.bench.map(k => group.rows.find(r => r.key === k)).filter(Boolean);
     const coach = group.coachRow;
 
     // Rows by position, the best of three in the middle as on the card.
@@ -229,6 +243,7 @@ export default function TeamCourt({
         setMenu(null);
         if (action === 'captain') onToggleCaptain?.(row.key);
         else if (action === 'bench') onToggleBench?.(row.key);
+        else if (action === 'sixth') onMakeSixth?.(row.key);
         else if (action === 'remove') onRemove?.(row.key);
         else onOpenPlayer?.(row.player.PlayerName);
     };
@@ -283,23 +298,26 @@ export default function TeamCourt({
             <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
                 {bench.map(row => (
                     <div key={row.key} className="relative">
-                        <Tile onClick={() => tap(row)}>
-                            <div className="relative -mx-1.5" style={{ containerType: 'inline-size' }}>
-                                <Bust url={photoUrl(photos[row.key], 140)} name={row.player.PlayerName} size="100cqw" />
+                        <Tile onClick={() => tap(row)} tone={row.sixth ? '!border-emerald-400/45' : ''}>
+                            <div className={TILE_PHOTO}>
+                                <Bust url={photoUrl(photos[row.key], 140)} name={row.player.PlayerName} size="128px" />
                                 <Bubble event={lastEvent?.get(row.key)} factor={row.factor} now={now} />
                             </div>
-                            <div className="mt-0.5 text-[13px] font-extrabold text-white truncate">
+                            <div className="mt-0.5 w-full text-[13px] font-extrabold text-white truncate">
                                 <span className="mr-1 px-1 rounded bg-violet-500/25 text-violet-300 text-[9px] align-middle">{row.player.position || '?'}</span>
                                 {surname(row.player.PlayerName)}
                             </div>
-                            <div className="flex items-center justify-center gap-1 text-[11px] text-gray-400 whitespace-nowrap">
+                            <div className="w-full flex items-center justify-center gap-1 text-[11px] text-gray-400 whitespace-nowrap">
                                 {row.state === 'live' && <LiveDot />}
                                 {row.counted === null
                                     ? <span className="truncate"><GameNote row={row} now={now} /></span>
-                                    : <><span className="font-mono font-bold text-white">{fixed(row.counted)}</span> FPT</>}
+                                    : row.factor === 0.5
+                                        ? <><span className="font-mono font-bold text-white">{fixed(row.counted)}</span> of {fixed(row.score)}</>
+                                        : <><span className="font-mono font-bold text-white">{fixed(row.counted)}</span> FPT</>}
                             </div>
-                            <div className="mt-1 inline-block text-[9px] font-extrabold tracking-wider uppercase px-1.5 py-0.5 rounded bg-white/[0.06] text-gray-400">
-                                Bench · 50%
+                            <div className={`mt-auto inline-block text-[9px] font-extrabold tracking-wider uppercase px-1.5 py-0.5 rounded
+                                ${row.sixth ? 'bg-emerald-500/15 text-emerald-300' : 'bg-white/[0.06] text-gray-400'}`}>
+                                {row.sixth ? '6th man · 100%' : 'Bench · 50%'}
                             </div>
                         </Tile>
                         {menu === row.key && <PlayerMenu row={row} onAction={(a) => act(row, a)} onClose={() => setMenu(null)} />}
@@ -308,31 +326,34 @@ export default function TeamCourt({
                 {Array.from({ length: emptyBench }, (_, i) => (
                     <Tile key={`empty-${i}`} dashed onClick={onAddPlayers}>
                         <Plus size={16} />
-                        <span className="mt-1 text-[11px]">Bench</span>
+                        <span className="mt-1 text-[11px]">{bench.length === 0 && i === 0 ? '6th man · 100%' : 'Bench · 50%'}</span>
                     </Tile>
                 ))}
                 {coach ? (
-                    <Tile tone="border-violet-500/30" onClick={editable ? onPickCoach : undefined}>
-                        <div className="relative h-[74px] flex items-center justify-center">
+                    <Tile tone="!border-violet-500/30" onClick={editable ? onPickCoach : undefined}>
+                        <div className={`${TILE_PHOTO} flex items-center justify-center`}>
                             <div className="absolute w-[88px] h-[88px] rounded-full" style={{ background: 'radial-gradient(circle, rgba(139,92,246,0.5), rgba(139,92,246,0) 70%)' }} />
                             {crests[coach.code] ? (
-                                <img src={photoUrl(crests[coach.code], 120)} alt="" className="relative h-[52px] w-[52px] object-contain" />
+                                // Crests are drawn for a light background; many are dark.
+                                <span className="relative flex items-center justify-center w-[62px] h-[62px] rounded-full bg-white/90 shadow-lg">
+                                    <img src={photoUrl(crests[coach.code], 120)} alt="" className="h-[44px] w-[44px] object-contain" />
+                                </span>
                             ) : (
                                 <span className="relative text-lg font-extrabold text-violet-200">{initials(coach.player.PlayerName)}</span>
                             )}
                         </div>
-                        <div className="text-[13px] font-extrabold text-white truncate">
+                        <div className="mt-0.5 w-full text-[13px] font-extrabold text-white truncate">
                             <span className="mr-1 px-1 rounded bg-violet-500/25 text-violet-300 text-[9px] align-middle">HC</span>
                             {surname(coach.player.PlayerName)}
                         </div>
-                        <div className="flex items-center justify-center gap-1 text-[11px] text-gray-400 whitespace-nowrap">
+                        <div className="w-full flex items-center justify-center gap-1 text-[11px] text-gray-400 whitespace-nowrap">
                             {coach.state === 'live' && <LiveDot />}
                             {coach.counted === null
                                 ? <span className="truncate"><GameNote row={coach} now={now} /></span>
                                 : <><span className="font-mono font-bold text-white">{coach.counted > 0 ? '+' : ''}{fixed(coach.counted)}</span>
                                     <span className="truncate">{coach.margin !== null && coach.margin !== undefined ? marginText(coach.margin, coach.state === 'final') : ''}</span></>}
                         </div>
-                        <div className="mt-1 inline-block text-[9px] font-extrabold tracking-wider uppercase px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-200">
+                        <div className="mt-auto inline-block text-[9px] font-extrabold tracking-wider uppercase px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-200">
                             Coach
                         </div>
                     </Tile>

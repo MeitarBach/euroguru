@@ -15,6 +15,8 @@ export const TEAM_LIMIT = 5;
 export const STARTERS = 5;
 export const BENCH = 5;
 export const LEAGUE_LIMIT = 30;
+// `bench` is ordered: its first player is the sixth man, who counts in full (the rest
+// half) - see ROLE_FACTOR in lib/live/rows.js.
 export const EMPTY_LINEUP = Object.freeze({ keys: [], bench: [], captain: null, coach: null });
 
 const TEAM_COLUMNS = 'id, name, lineup, share_slug, created_at';

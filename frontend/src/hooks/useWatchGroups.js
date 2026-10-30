@@ -132,6 +132,13 @@ export default function useWatchGroups() {
         }));
     }, [groups, save]);
 
+    // The sixth man is the first on the bench: move this bench player to the front.
+    const makeSixth = useCallback((groupId, key) => {
+        save(groups.map(g => (g.id === groupId && g.bench.includes(key)
+            ? { ...g, bench: [key, ...g.bench.filter(k => k !== key)] }
+            : g)));
+    }, [groups, save]);
+
     const toggle = useCallback((groupId, key) => {
         const group = groups.find(g => g.id === groupId);
         return group?.keys.includes(key) ? remove(groupId, key) : add(groupId, key);
@@ -182,7 +189,7 @@ export default function useWatchGroups() {
 
     return {
         groups, selected, select, allKeys,
-        add, remove, toggle, toggleBench, toggleCaptain, toggleCoach, create, rename, destroy,
+        add, remove, toggle, toggleBench, toggleCaptain, toggleCoach, makeSixth, create, rename, destroy,
         atLimit, limit: locked ? FREE_WATCH_LIMIT : null,
     };
 }

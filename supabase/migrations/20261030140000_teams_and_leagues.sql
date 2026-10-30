@@ -1,6 +1,8 @@
 -- Teams and leagues for the Live tab.
 --
--- A team is 5 starters (one captain, x2), 5 bench players (x0.5) and a head coach -
+-- A team is 5 starters (one captain, x2), 5 bench players and a head coach. The first
+-- player on the bench is the sixth man and counts in full (x1); the other four count
+-- half (x0.5), so the bench's order matters and is kept as saved. The lineup has
 -- the same shape as a Live tab watchlist (frontend/src/hooks/useWatchGroups.js):
 --   lineup = { keys: ["id:<n>", ...], bench: [...], captain: "id:<n>" | null, coach: "coach:<n>" | null }
 -- where `keys` holds every player and `bench` is the subset on the bench.

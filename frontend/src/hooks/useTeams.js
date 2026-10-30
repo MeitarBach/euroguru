@@ -154,6 +154,11 @@ export default function useTeams({ lock, notify } = {}) {
         return { ...l, captain: key, bench: l.bench.filter(k => k !== key) };
     }), [edit, say]);
 
+    // The sixth man is the first on the bench: move this bench player to the front.
+    const makeSixth = useCallback((teamId, key) => edit(teamId, (l) => (
+        l.bench.includes(key) ? { ...l, bench: [key, ...l.bench.filter(k => k !== key)] } : null
+    )), [edit]);
+
     const toggle = useCallback((teamId, key) => {
         const team = latest.current.find(t => t.id === teamId);
         return lineupOf(team).keys.includes(key) ? remove(teamId, key) : add(teamId, key);
@@ -219,7 +224,7 @@ export default function useTeams({ lock, notify } = {}) {
         status,
         reload,
         groups, selected, select, allKeys,
-        add, remove, toggle, toggleBench, toggleCaptain, toggleCoach, create, rename, destroy,
+        add, remove, toggle, toggleBench, toggleCaptain, toggleCoach, makeSixth, create, rename, destroy,
         atLimit: false,
         limit: null,
         full: teams.length >= TEAM_LIMIT,
