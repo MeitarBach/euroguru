@@ -1,8 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Radio, UserPlus, Volume2, VolumeX, FlaskConical, Plus, RefreshCw } from 'lucide-react';
+import { Radio, UserPlus, Volume2, VolumeX, FlaskConical, Plus, RefreshCw, Lock, Unlock, LogIn, Shirt } from 'lucide-react';
 import { fetchStats, fetchCoaches } from '../services/api';
 import { CURRENT_SEASON } from '../seasons';
 import useWatchGroups, { GROUP_COLORS } from '../hooks/useWatchGroups';
+import useTeams from '../hooks/useTeams';
+import useRoundLock from '../hooks/useRoundLock';
+import { useAuth } from '../hooks/authContext';
+import { TEAM_LIMIT, STARTERS, BENCH } from '../lib/leagues';
 import useLiveRound from '../hooks/useLiveRound';
 import useNow from '../hooks/useNow';
 import { useOpenPlayer } from '../hooks/playerDetailContext';
@@ -30,12 +34,26 @@ const SEASON_CODE = `E${CURRENT_SEASON}`;
 // for its widest view, so it is usually already cached.
 const ROSTER_QUERY = { season: CURRENT_SEASON, position: 'All', min_cr: 0, max_cr: 100, last_x_games: 100 };
 const SOUND_KEY = 'euroguru.liveSound';
+// Which list the tab shows - your teams or your watchlists - remembered per device.
+const MODE_KEY = 'euroguru.liveMode';
+const MODES = [['teams', 'My teams'], ['watchlists', 'Watchlists']];
 const BIG_PLAY = 3;
 // Euroleague's edge holds an answer for up to a minute; much older than that while a
 // game is on means their feed has stalled, which is worth saying out loud.
 const STALE_FEED_MS = 150_000;
 
 const fixedScore = (x) => x.toFixed(decimalsFor(x));
+
+const loadMode = () => {
+    try {
+        const saved = window.localStorage.getItem(MODE_KEY);
+        return MODES.some(([id]) => id === saved) ? saved : null;
+    } catch {
+        return null;
+    }
+};
+
+const clock = (ms) => new Date(ms).toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' });
 
 const loadSound = () => {
     try {
@@ -84,7 +102,148 @@ function Freshness({ connection, games, now }) {
     );
 }
 
-function EmptyState({ group, suggestions, onAdd, onPick }) {
+function ModeSwitch({ mode, onChange }) {
+    return (
+        <div role="tablist" className="inline-flex p-1 rounded-xl bg-white/[0.04] border border-white/10">
+            {MODES.map(([id, label]) => (
+                <button
+                    key={id}
+                    type="button"
+                    role="tab"
+                    aria-selected={mode === id}
+                    onClick={() => onChange(id)}
+                    className={`px-3.5 py-1.5 rounded-lg text-sm transition-colors ${mode === id
+                        ? 'bg-purple-500/20 text-white font-medium'
+                        : 'text-gray-400 hover:text-white'}`}
+                >
+                    {label}
+                </button>
+            ))}
+        </div>
+    );
+}
+
+/** When teams' lineups freeze, or until when they are frozen. */
+function LockBanner({ lock, now }) {
+    if (!lock.ready) return null;
+    if (lock.locked) {
+        return (
+            <div className="flex items-center gap-2.5 px-4 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/25 text-sm text-amber-200">
+                <Lock size={15} className="shrink-0" />
+                <span>
+                    Lineups are locked for Round {lock.round}. They open again {clock(lock.until)}
+                    <span className="text-amber-200/60"> (in {countdown(lock.until - now)})</span>.
+                </span>
+            </div>
+        );
+    }
+    if (!lock.nextLock) return null;
+    return (
+        <div className="flex items-center gap-2.5 px-4 py-2.5 rounded-xl bg-white/[0.03] border border-white/10 text-sm text-gray-300">
+            <Unlock size={15} className="shrink-0 text-emerald-300" />
+            <span>
+                Lineups lock for Round {lock.nextRound} at its first tip-off, {clock(lock.nextLock)}
+                <span className="text-gray-500"> (in {countdown(lock.nextLock - now)})</span>.
+            </span>
+        </div>
+    );
+}
+
+/** My teams before there is a team to show: signed out, loading, failed, or none yet. */
+function TeamsGate({ teams, lists, onSignIn, onCreate, onImport, locked }) {
+    const [name, setName] = useState('');
+    if (!teams.signedIn) {
+        return (
+            <div className="glass-panel p-6 sm:p-8 text-center">
+                <div className="mx-auto mb-3 w-12 h-12 rounded-full flex items-center justify-center bg-purple-500/15 border border-purple-500/30 text-purple-300">
+                    <Shirt size={22} />
+                </div>
+                <h3 className="text-lg font-semibold text-white">Your fantasy teams, saved and live</h3>
+                <p className="mt-1 text-sm text-gray-400 max-w-md mx-auto">
+                    Sign in free to save up to {TEAM_LIMIT} teams - {STARTERS} starters, {BENCH} on the bench and a coach -
+                    follow them live, and play them against friends in a league.
+                </p>
+                <button
+                    type="button"
+                    onClick={onSignIn}
+                    className="mt-4 inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium text-white bg-gradient-to-r from-purple-600 to-purple-500 hover:from-purple-500 hover:to-purple-400"
+                >
+                    <LogIn size={16} /> Sign in free
+                </button>
+            </div>
+        );
+    }
+    if (teams.status === 'loading' || teams.status === 'idle') {
+        return (
+            <div className="w-full h-[200px] flex items-center justify-center">
+                <div className="w-7 h-7 border-2 border-purple-500 border-t-transparent rounded-full animate-spin"></div>
+            </div>
+        );
+    }
+    if (teams.status === 'error') {
+        return (
+            <div className="glass-panel p-5 flex items-center justify-between gap-4">
+                <span className="text-sm text-gray-300">Couldn't load your teams.</span>
+                <button
+                    type="button"
+                    onClick={teams.reload}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm border border-white/10 text-gray-200 hover:bg-white/5"
+                >
+                    <RefreshCw size={14} /> Try again
+                </button>
+            </div>
+        );
+    }
+    // A watchlist that is really a team ("My team", built before teams existed).
+    const importable = lists.groups.find(g => g.keys.length > 0);
+    return (
+        <div className="glass-panel p-6 sm:p-8 text-center">
+            <div className="mx-auto mb-3 w-12 h-12 rounded-full flex items-center justify-center bg-purple-500/15 border border-purple-500/30 text-purple-300">
+                <Shirt size={22} />
+            </div>
+            <h3 className="text-lg font-semibold text-white">Make your first team</h3>
+            <p className="mt-1 text-sm text-gray-400 max-w-md mx-auto">
+                {STARTERS} starters (one captain counts double), {BENCH} on the bench at half, and a coach. Lineups lock at
+                each round's first tip-off, and a team can join your friends' leagues.
+            </p>
+            <form
+                className="mt-4 flex items-center justify-center gap-2 max-w-sm mx-auto"
+                onSubmit={(e) => { e.preventDefault(); onCreate(name); setName(''); }}
+            >
+                <input
+                    value={name}
+                    maxLength={24}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Team name"
+                    className="input-dark flex-1 min-w-0 py-2 text-sm"
+                />
+                <button
+                    type="submit"
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium text-white bg-gradient-to-r from-purple-600 to-purple-500 hover:from-purple-500 hover:to-purple-400"
+                >
+                    <Plus size={15} /> Create
+                </button>
+            </form>
+            {importable && (
+                <div className="mt-5 text-sm text-gray-400">
+                    Or{' '}
+                    <button
+                        type="button"
+                        onClick={() => onImport(importable)}
+                        disabled={locked}
+                        title={locked ? 'Lineups are locked until the round ends' : undefined}
+                        className="font-medium text-purple-300 hover:text-purple-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        turn "{importable.name}" into a team
+                    </button>
+                    {' '}({importable.keys.length} players). The watchlist stays as it is.
+                </div>
+            )}
+        </div>
+    );
+}
+
+function EmptyState({ group, suggestions, onAdd, onPick, isTeam }) {
     return (
         <div className="glass-panel p-6 sm:p-8 text-center">
             <div className="mx-auto mb-3 w-12 h-12 rounded-full flex items-center justify-center bg-purple-500/15 border border-purple-500/30 text-purple-300">
@@ -92,8 +251,11 @@ function EmptyState({ group, suggestions, onAdd, onPick }) {
             </div>
             <h3 className="text-lg font-semibold text-white">Who's in {group.name}?</h3>
             <p className="mt-1 text-sm text-gray-400 max-w-md mx-auto">
-                Add the players on this roster. Their fantasy points update live while they play, and the
-                group's total moves with every basket, board and turnover. Make a group for each team in your league.
+                {isTeam
+                    ? <>Pick {STARTERS} starters and {BENCH} for the bench, then a captain and a coach. Their fantasy
+                        points update live while they play.</>
+                    : <>Add the players on this roster. Their fantasy points update live while they play, and the
+                        group's total moves with every basket, board and turnover.</>}
             </p>
             <button
                 type="button"
@@ -206,7 +368,23 @@ export default function LiveView() {
     }, []);
     const [sound, setSound] = useState(loadSound);
     const now = useNow(1000);
-    const watch = useWatchGroups();
+    const { user, openAuth } = useAuth();
+    const [savedMode, setSavedMode] = useState(loadMode);
+    // Signed in, your teams come first; signed out, watchlists work without an account.
+    const mode = savedMode ?? (user ? 'teams' : 'watchlists');
+    const changeMode = (next) => {
+        setSavedMode(next);
+        setOpenGame(null);
+        try {
+            window.localStorage.setItem(MODE_KEY, next);
+        } catch { /* the choice just lasts this visit */ }
+    };
+    const lock = useRoundLock(CURRENT_SEASON, now);
+    const lists = useWatchGroups();
+    const teams = useTeams({ lock, notify: flash });
+    // The list on screen. Both are followed live either way, so switching is instant.
+    const watch = mode === 'teams' ? teams : lists;
+    const isTeams = mode === 'teams';
     const openPlayer = useOpenPlayer();
 
     useEffect(() => {
@@ -216,11 +394,12 @@ export default function LiveView() {
         return () => { alive = false; };
     }, []);
     const coachByKey = useMemo(() => new Map(coaches.map(c => [coachKey(c), c])), [coaches]);
-    // Every coach some group has, for the live loop to follow by score.
-    const watchCoaches = useMemo(() => [...new Set(watch.groups.map(g => g.coach).filter(Boolean))]
+    // Everyone in a team or a watchlist, and every coach either has, for the live loop.
+    const followedKeys = useMemo(() => [...new Set([...teams.allKeys, ...lists.allKeys])], [teams.allKeys, lists.allKeys]);
+    const watchCoaches = useMemo(() => [...new Set([...teams.groups, ...lists.groups].map(g => g.coach).filter(Boolean))]
         .map(key => coachByKey.get(key))
         .filter(Boolean)
-        .map(c => ({ key: coachKey(c), code: c.TeamCode, name: c.CoachName })), [watch.groups, coachByKey]);
+        .map(c => ({ key: coachKey(c), code: c.TeamCode, name: c.CoachName })), [teams.groups, lists.groups, coachByKey]);
 
     // A big play chimes - when the viewer has turned sound on.
     const soundOn = useRef(sound);
@@ -253,7 +432,7 @@ export default function LiveView() {
         source,
         seasonCode: demo ? `${SEASON_CODE}-demo` : SEASON_CODE,
         roster,
-        watchKeys: watch.allKeys,
+        watchKeys: followedKeys,
         watchCoaches,
         onEvents,
         focusCode: openGame,
@@ -262,11 +441,11 @@ export default function LiveView() {
     const rosterByKey = useMemo(() => new Map((roster ?? []).map(p => [p.PlayerKey, p])), [roster]);
     // One row per followed player, shared by every group they are in.
     const rowByKey = useMemo(() => new Map(
-        watch.allKeys
+        followedKeys
             .map(k => rosterByKey.get(k))
             .filter(Boolean)
             .map(p => [p.PlayerKey, watchRow(p, live.games)]),
-    ), [watch.allKeys, rosterByKey, live.games]);
+    ), [followedKeys, rosterByKey, live.games]);
     // Each group counts its own players by their role in it - captain double, bench
     // half - with the captain pinned to the top of the starters.
     const groups = useMemo(() => watch.groups.map(g => {
@@ -280,7 +459,8 @@ export default function LiveView() {
             ...g, colorHex: GROUP_COLORS[g.color % GROUP_COLORS.length], rows, coachRow: coachLine, sums: totals(rows, coachLine),
         };
     }), [watch.groups, rowByKey, coachByKey, live.games]);
-    const group = groups.find(g => g.id === watch.selected.id) ?? groups[0];
+    // Null only in My teams with no team yet (or signed out): TeamsGate shows instead.
+    const group = groups.find(g => g.id === watch.selected?.id) ?? groups[0] ?? null;
     const groupsOf = useCallback((key) => groups.filter(g => g.keys.includes(key) || g.coach === key), [groups]);
     // The open game, if any: the main column shows it in place of the group, and the
     // feed beside it follows that game rather than your players.
@@ -305,10 +485,10 @@ export default function LiveView() {
     const suggestions = useMemo(() => {
         const playing = new Set(live.games.filter(g => g.status !== 'final').flatMap(g => [g.homeCode, g.awayCode]));
         return (roster ?? [])
-            .filter(p => playing.has(euroleagueCode(p)) && typeof p.Average_Score === 'number' && !group.keys.includes(p.PlayerKey))
+            .filter(p => playing.has(euroleagueCode(p)) && typeof p.Average_Score === 'number' && !group?.keys.includes(p.PlayerKey))
             .sort((a, b) => b.Average_Score - a.Average_Score)
             .slice(0, 8);
-    }, [roster, live.games, group.keys]);
+    }, [roster, live.games, group?.keys]);
 
     const nameOf = useCallback((key, event) => rosterByKey.get(key)?.PlayerName
         ?? coachByKey.get(key)?.CoachName
@@ -319,14 +499,19 @@ export default function LiveView() {
 
     const loading = live.status === 'loading' || roster === null;
 
-    const board = (
+    const board = group && (
         <GroupBoard
             round={live.round}
             groups={groups}
             selectedId={group.id}
             onSelect={(id) => { watch.select(id); setOpenGame(null); }}
-            // A new group is empty by definition, so go straight to filling it.
-            onCreate={(name) => { watch.create(name); openPicker(); }}
+            // A new watchlist is empty by definition, so go straight to filling it. A new
+            // team arrives once the database has it, and opens then.
+            onCreate={isTeams
+                ? (teams.full ? null : (name) => teams.create(name))
+                : (name) => { lists.create(name); openPicker(); }}
+            noun={isTeams ? 'teams' : 'watchlists'}
+            placeholder={isTeams ? 'Team name' : "e.g. Dana's team"}
         />
     );
 
@@ -367,7 +552,8 @@ export default function LiveView() {
                     <button
                         type="button"
                         onClick={() => openPicker()}
-                        disabled={loading}
+                        disabled={loading || !group || (isTeams && lock.locked)}
+                        title={isTeams && lock.locked ? `Lineups are locked for Round ${lock.round}` : undefined}
                         className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium text-white bg-gradient-to-r from-purple-600 to-purple-500 hover:from-purple-500 hover:to-purple-400 disabled:opacity-50"
                     >
                         <UserPlus size={16} /> Add players
@@ -406,6 +592,11 @@ export default function LiveView() {
                         onOpen={(g) => setOpenGame(code => (code === g.code ? null : g.code))}
                     />
 
+                    <div className="flex flex-col gap-3">
+                        <ModeSwitch mode={mode} onChange={changeMode} />
+                        {isTeams && teams.signedIn && <LockBanner lock={lock} now={now} />}
+                    </div>
+
                     {invite && (
                         <div className="flex flex-col sm:flex-row sm:items-center gap-3 px-4 py-3 rounded-xl bg-purple-500/10 border border-purple-500/30 text-sm">
                             <span className="flex-1 text-gray-200">
@@ -415,11 +606,11 @@ export default function LiveView() {
                                 <button
                                     type="button"
                                     onClick={() => {
-                                        watch.create(invite.name, invite.keys, { bench: invite.bench, captain: invite.captain, coach: invite.coach });
-                                        setOpenGame(null);
+                                        lists.create(invite.name, invite.keys, { bench: invite.bench, captain: invite.captain, coach: invite.coach });
+                                        changeMode('watchlists');
                                         setInvite(null);
                                         clearInvite();
-                                        flash(`${invite.name} added to your groups`);
+                                        flash(`${invite.name} added to your watchlists`);
                                     }}
                                     className="px-3 py-1.5 rounded-lg text-xs font-medium text-white bg-purple-600 hover:bg-purple-500"
                                 >
@@ -436,6 +627,16 @@ export default function LiveView() {
                         </div>
                     )}
 
+                    {!group && !game ? (
+                        <TeamsGate
+                            teams={teams}
+                            lists={lists}
+                            locked={lock.locked}
+                            onSignIn={() => openAuth('Save your fantasy teams')}
+                            onCreate={(name) => teams.create(name)}
+                            onImport={(g) => teams.create(g.name, g.keys, { bench: g.bench, captain: g.captain, coach: g.coach })}
+                        />
+                    ) : (
                     <div className="grid grid-cols-1 xl:grid-cols-3 gap-5 items-start">
                         {/* On a phone the scoreboard leads; on a wide screen it moves to the side. */}
                         <div className="xl:hidden">{board}</div>
@@ -459,14 +660,17 @@ export default function LiveView() {
                             <GroupHeader
                                 key={group.id}
                                 group={group}
-                                canDelete={groups.length > 1}
+                                canDelete={isTeams || groups.length > 1}
                                 onRename={(name) => watch.rename(group.id, name)}
-                                onShare={() => shareGroup(group, live.round).then(flash)}
+                                // Watchlists share an image and a copy link; teams get a
+                                // live public page instead (phase C).
+                                onShare={isTeams ? null : () => shareGroup(group, live.round).then(flash)}
                                 onDelete={() => watch.destroy(group.id)}
                             />
                             {group.rows.length === 0 ? (
                                 <EmptyState
                                     group={group}
+                                    isTeam={isTeams}
                                     suggestions={suggestions}
                                     onAdd={(key) => watch.add(group.id, key)}
                                     onPick={() => openPicker()}
@@ -532,6 +736,7 @@ export default function LiveView() {
                             />
                         </aside>
                     </div>
+                    )}
                 </>
             )}
 
@@ -541,7 +746,7 @@ export default function LiveView() {
                 </div>
             )}
 
-            {picker.open && roster && (
+            {picker.open && roster && group && (
                 <LivePicker
                     roster={roster}
                     games={live.games}

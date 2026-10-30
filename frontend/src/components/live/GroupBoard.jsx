@@ -40,8 +40,9 @@ function InlineName({ initial = '', placeholder, onSubmit, onCancel, submitLabel
  * Every group's total, ranked live - the head-to-head against the rest of the league.
  *
  * Rows re-rank as totals move, gliding rather than jumping, so an overtake is visible.
+ * `noun` names what is listed ("groups", "teams"); `onCreate` null hides the add button.
  */
-export function GroupBoard({ round, groups, selectedId, onSelect, onCreate }) {
+export function GroupBoard({ round, groups, selectedId, onSelect, onCreate, noun = 'groups', placeholder = "e.g. Dana's team" }) {
     const [creating, setCreating] = useState(false);
     const ranked = [...groups].sort((a, b) =>
         (b.sums.total - a.sums.total) || (b.sums.projected - a.sums.projected) || a.name.localeCompare(b.name));
@@ -52,15 +53,15 @@ export function GroupBoard({ round, groups, selectedId, onSelect, onCreate }) {
         <div className="glass-panel p-3 sm:p-4">
             <div className="flex items-center justify-between mb-2 px-1">
                 <h3 className="text-[11px] uppercase tracking-wider text-gray-500 font-semibold">
-                    {round ? `Round ${round} · ` : ''}groups
+                    {round ? `Round ${round} · ` : ''}{noun}
                 </h3>
-                {!creating && (
+                {!creating && onCreate && (
                     <button
                         type="button"
                         onClick={() => setCreating(true)}
                         className="inline-flex items-center gap-1 text-xs font-medium text-purple-300 hover:text-purple-200"
                     >
-                        <Plus size={13} /> New group
+                        <Plus size={13} /> New {noun.replace(/s$/, '')}
                     </button>
                 )}
             </div>
@@ -112,7 +113,7 @@ export function GroupBoard({ round, groups, selectedId, onSelect, onCreate }) {
             {creating && (
                 <div className="mt-2 px-1">
                     <InlineName
-                        placeholder="e.g. Dana's team"
+                        placeholder={placeholder}
                         submitLabel="Create"
                         onSubmit={(name) => { onCreate(name); setCreating(false); }}
                         onCancel={() => setCreating(false)}
