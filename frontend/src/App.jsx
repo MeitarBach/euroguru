@@ -11,14 +11,18 @@ import MatchupsView from './components/MatchupsView';
 import LiveView from './components/LiveView';
 import { PlayerDetailProvider } from './hooks/usePlayerDetail';
 import { AuthProvider } from './hooks/useAuth';
+import { readLeagueCode } from './lib/leagues';
+
+const opensLive = () => new URLSearchParams(window.location.search).has('join') || Boolean(readLeagueCode());
 
 function App() {
-  // An invite link (?join=) is about the Live tab, so it opens there.
-  const [activeTab, setActiveTab] = useState(() => (new URLSearchParams(window.location.search).has('join') ? 'live' : 'dashboard'));
+  // An invite link (?join= for a watchlist, ?league= for a league) is about the Live
+  // tab, so it opens there.
+  const [activeTab, setActiveTab] = useState(() => (opensLive() ? 'live' : 'dashboard'));
   // Live is the one view that stays mounted once opened: it polls the games, and its
   // feed and sparklines are built up over the evening, so leaving it for the stats
   // table and coming back should not start it over.
-  const [liveMounted, setLiveMounted] = useState(() => new URLSearchParams(window.location.search).has('join'));
+  const [liveMounted, setLiveMounted] = useState(opensLive);
   const selectTab = (tab) => {
     if (tab === 'live') setLiveMounted(true);
     setActiveTab(tab);

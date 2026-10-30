@@ -106,14 +106,27 @@ export const removeFromLeague = (leagueId, teamId) =>
 
 export const leagueLink = (code) => `${window.location.origin}/?league=${encodeURIComponent(code)}`;
 
-/** The ?league= code this page was opened with, or null. */
+// An invite opened signed out survives the sign-in: Google sends you back to the bare
+// origin (lib/auth.js), which would drop ?league=, so the code waits here meanwhile.
+const PENDING_KEY = 'euroguru.pendingLeague';
+const validCode = (code) => (code && /^[0-9a-f]{6,16}$/i.test(code) ? code : null);
+
+/** The league invite this visit is about - from ?league=, or one awaiting sign-in - or null. */
 export function readLeagueCode(search = window.location.search) {
-    const code = new URLSearchParams(search).get('league');
-    return code && /^[0-9a-f]{6,16}$/i.test(code) ? code : null;
+    const fromUrl = validCode(new URLSearchParams(search).get('league'));
+    try {
+        if (fromUrl) window.sessionStorage.setItem(PENDING_KEY, fromUrl);
+        return fromUrl ?? validCode(window.sessionStorage.getItem(PENDING_KEY));
+    } catch {
+        return fromUrl;
+    }
 }
 
-/** Drop ?league= from the address bar once it has been handled. */
+/** Forget the invite - joined or dismissed - and drop ?league= from the address bar. */
 export function clearLeagueCode() {
+    try {
+        window.sessionStorage.removeItem(PENDING_KEY);
+    } catch { /* nothing was kept */ }
     const url = new URL(window.location.href);
     url.searchParams.delete('league');
     window.history.replaceState(null, '', url.pathname + url.search + url.hash);
