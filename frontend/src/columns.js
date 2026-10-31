@@ -28,14 +28,14 @@ export const COLUMNS = [
       info: 'Change in minutes over the last 3 games versus the season average. A rising role often shows up here before the scoring follows.' },
 
     { id: 'TS', axis: 'numeric', label: 'TS%', aggLabel: 'TS%', key: 'TS%', aggKey: 'Average_TS', align: 'right', fmt: 'pct', cat: 'Efficiency', on: true,
-      info: 'True Shooting %: scoring efficiency counting twos, threes and free throws together. Points \u00f7 (2 \u00d7 (field goal attempts + 0.44 \u00d7 free throw attempts)). Around 55% is average, 60%+ is strong.' },
+      info: 'True Shooting %: scoring efficiency counting twos, threes and free throws together. Points \u00f7 (2 \u00d7 (field goal attempts + 0.44 \u00d7 free throw attempts)). Around 58% is average, 60%+ is strong. A hot night can top 100%, since a three counts 1.5 shots. Shown from 5 shooting attempts.' },
     { id: 'Per36', axis: 'numeric', label: 'Per 36', aggLabel: 'Per 36', key: null, aggKey: 'Per36_Score', align: 'right', fmt: 'num', cat: 'Efficiency', on: false,
       info: 'Score projected to 36 minutes, so a bench player and a starter can be compared on equal footing. Useful for spotting someone who would produce if given more court time.' },
     { id: 'AstTo', axis: 'numeric', label: 'AST/TO', aggLabel: 'AST/TO', key: 'AstTo', aggKey: 'Average_AstTo', align: 'right', fmt: 'num', cat: 'Efficiency', on: false,
       info: 'Assists per turnover. Ball security for playmakers \u2014 turnovers cost you points in fantasy scoring, so a low ratio quietly drags a guard down.' },
 
     { id: 'Usage', axis: 'numeric', label: 'Usage%', aggLabel: 'Usage%', key: 'Usage%', aggKey: 'Average_Usage', align: 'right', fmt: 'pct', cat: 'Involvement', on: true,
-      info: 'Share of the team\u2019s possessions this player finishes while on court \u2014 shots, trips to the line and turnovers. High usage means the offence runs through them, which is what you want when a teammate is injured.' },
+      info: 'Share of the team\u2019s possessions this player finishes while on court \u2014 shots, trips to the line and turnovers. High usage means the offence runs through them, which is what you want when a teammate is injured. Shown from 10 minutes.' },
     { id: 'FGA', axis: 'numeric', label: 'FGA', aggLabel: 'Avg FGA', key: 'FGA', aggKey: 'Average_FGA', align: 'right', fmt: 'num', cat: 'Involvement', on: false,
       info: 'Field goal attempts per game \u2014 raw shot volume.' },
 

@@ -35,6 +35,17 @@ COLUMN_ALIASES = {
 _FGA_PARTS = ["FieldGoalsAttempted2", "FieldGoalsAttempted3"]
 _FGM_PARTS = ["FieldGoalsMade2", "FieldGoalsMade3"]
 
+# The least a TS% or Usage% needs behind it to mean something - in one game or over
+# any window. Below it the rate is noise (one made three is 150% true shooting, two
+# shots in a four-minute cameo are 50% usage), so it is left empty rather than shown.
+# A hot night above the bar can honestly top 100% TS: a three counts 1.5 shots.
+MIN_TS_ATTEMPTS = 5      # FGA + 0.44 x FTA
+MIN_USAGE_MINUTES = 10
+
+# Team totals per game, carried from the boxscore (which lists every player) so usage
+# is not inflated when the fantasy feed is missing someone. See merge_boxscore_columns.
+_TEAM_TOTALS = {"TeamMin": "min", "TeamFGA": "fga", "TeamFTA": "fta", "TeamTOV": "tov"}
+
 
 def _parse_minutes(value):
     """
@@ -150,19 +161,20 @@ def add_derived_stats(df):
         df["FGM"] = _sum_available(df, _FGM_PARTS)
 
     # True shooting: points per shooting possession, where a trip to the line counts
-    # as 0.44 of one. Zero attempts must be NaN, not 0% - a player who never shot
-    # did not shoot badly.
+    # as 0.44 of one. Too few attempts is NaN, not a number - a player who took one
+    # shot did not shoot 150% or 0%, he barely shot.
     if not fga.isna().all() and not pts.isna().all():
-        shooting_possessions = 2 * (fga + 0.44 * fta.fillna(0))
-        df["TS%"] = 100 * pts / shooting_possessions.replace(0, np.nan)
+        attempts = fga + 0.44 * fta.fillna(0)
+        df["TS%"] = (100 * pts / (2 * attempts)).where(attempts >= MIN_TS_ATTEMPTS)
 
     if "Assistances" in df.columns and "Turnovers" in df.columns:
         ast = pd.to_numeric(df["Assistances"], errors="coerce")
         df["AstTo"] = ast / tov.replace(0, np.nan)
 
     # Usage: share of the team's possessions a player used while on the floor.
-    # Team totals come from the frame itself - every player in a game is present, so
-    # grouping by game+team reconstructs the box score exactly.
+    # Team totals come from the boxscore when the merge carried them (it lists every
+    # player); otherwise from the frame itself, grouped by game and team.
+    # UsePoss and TeamPossOn are kept so a season's usage is the ratio of their sums.
     if "MinutesPlayed" in df.columns and not fga.isna().all() and {"GameCode", "Team"} <= set(df.columns):
         work = pd.DataFrame({
             "GameCode": df["GameCode"], "Team": df["Team"],
@@ -170,13 +182,19 @@ def add_derived_stats(df):
             "fga": fga.fillna(0), "fta": fta.fillna(0), "tov": tov.fillna(0),
         })
         team = work.groupby(["GameCode", "Team"], dropna=False).agg(
-            tmin=("min", "sum"), tfga=("fga", "sum"), tfta=("fta", "sum"), ttov=("tov", "sum")
+            **{col: (part, "sum") for col, part in _TEAM_TOTALS.items()}
         )
         joined = work.join(team, on=["GameCode", "Team"])
+        for col in _TEAM_TOTALS:
+            if col in df.columns:
+                joined[col] = pd.to_numeric(df[col], errors="coerce").fillna(joined[col])
         player_poss = joined["fga"] + 0.44 * joined["fta"] + joined["tov"]
-        team_poss = joined["tfga"] + 0.44 * joined["tfta"] + joined["ttov"]
-        denominator = (joined["min"] * team_poss).replace(0, np.nan)
-        df["Usage%"] = (100 * player_poss * (joined["tmin"] / 5) / denominator).values
+        team_poss = joined["TeamFGA"] + 0.44 * joined["TeamFTA"] + joined["TeamTOV"]
+        # The team's possessions while he was on the floor.
+        on_floor = (team_poss * joined["min"] / (joined["TeamMin"] / 5).replace(0, np.nan)).replace(0, np.nan)
+        df["UsePoss"] = player_poss.where(on_floor.notna()).values
+        df["TeamPossOn"] = on_floor.values
+        df["Usage%"] = (100 * player_poss / on_floor).where(joined["min"] >= MIN_USAGE_MINUTES).values
 
     return df
 
@@ -631,6 +649,32 @@ def _boxscore_round_and_code(boxscore_df, schedule_df):
     return rounds, team_codes
 
 
+def _boxscore_team_totals(boxscore_df, round_and_code):
+    """
+    Each team's minutes, shot attempts, free throws and turnovers per game, keyed like
+    the join (_jr, _jc), or None when the boxscore lacks the columns.
+
+    Usage divides by the team's possessions, so they must count every player. The
+    boxscore lists everyone; the fantasy feed can miss one (a player it never priced),
+    and adding the team up from it would leave his possessions out and inflate his
+    teammates' usage.
+    """
+    needed = {"MinutesPlayed", "FreeThrowsAttempted", "Turnovers"}
+    if not needed <= set(boxscore_df.columns) or not any(c in boxscore_df.columns for c in _FGA_PARTS):
+        return None
+    rounds, codes = round_and_code
+    num = lambda col: pd.to_numeric(boxscore_df[col], errors="coerce").fillna(0).values
+    work = pd.DataFrame({
+        "_jr": pd.Series(rounds, dtype="Int64").values,
+        "_jc": pd.Series(codes, dtype=object).values,
+        "TeamMin": num("MinutesPlayed"),
+        "TeamFGA": _sum_available(boxscore_df, _FGA_PARTS).values,
+        "TeamFTA": num("FreeThrowsAttempted"),
+        "TeamTOV": num("Turnovers"),
+    }).dropna(subset=["_jr", "_jc"])
+    return work.groupby(["_jr", "_jc"], as_index=False).sum()
+
+
 def merge_boxscore_columns(fantasy_df, boxscore_df, schedule_df):
     """
     Add the columns only the Euroleague boxscore has onto the fantasy game log.
@@ -671,12 +715,11 @@ def merge_boxscore_columns(fantasy_df, boxscore_df, schedule_df):
               if c in boxscore_df.columns and c in fantasy_df.columns]
     checks = {c: f"_chk_{c}" for c in shared}
 
-    box = _boxscore_join_columns(
-        boxscore_df.rename(columns=checks),
-        _boxscore_round_and_code(boxscore_df, schedule_df),
-    )
+    round_and_code = _boxscore_round_and_code(boxscore_df, schedule_df)
+    box = _boxscore_join_columns(boxscore_df.rename(columns=checks), round_and_code)
     box = box.dropna(subset=["_jr", "_jc"])
     carry = extra + list(checks.values())
+    team_totals = _boxscore_team_totals(boxscore_df, round_and_code)
 
     fantasy_rounds = pd.to_numeric(fantasy_df["GameCode"], errors="coerce").astype("Int64")
     fantasy_codes = (
@@ -725,6 +768,10 @@ def merge_boxscore_columns(fantasy_df, boxscore_df, schedule_df):
 
     print(f"Boxscore merge: {matched.sum()}/{len(merged)} fantasy rows matched, "
           f"{len(extra)} columns added")
+
+    if team_totals is not None:
+        merged = merged.drop(columns=[c for c in _TEAM_TOTALS if c in merged.columns])
+        merged = merged.merge(team_totals, on=["_jr", "_jc"], how="left")
 
     return merged.drop(columns=["_jr", "_jc", "_ji", "_js"] + list(checks.values()))
 
@@ -1359,9 +1406,9 @@ def _rate_aggregates(window):
     Season rates built from summed components, never from averaged per-game ratios.
 
     A ratio has to be recomputed from its totals: true shooting is season points over
-    season shooting possessions. Usage is the exception - a correct season figure
-    needs team totals per game - so it is averaged, but weighted by minutes so a
-    two-minute cameo cannot count as much as a full game.
+    season shooting possessions, and usage is the possessions he used over the team's
+    possessions while he was on the floor, both summed over the games. Either is left
+    empty below MIN_TS_ATTEMPTS / MIN_USAGE_MINUTES in the window.
     """
     out = {}
     total = lambda col: pd.to_numeric(window[col], errors="coerce").fillna(0).sum() \
@@ -1369,21 +1416,19 @@ def _rate_aggregates(window):
 
     pts, fga, fta = total("Points"), total("FGA"), total("FreeThrowsAttempted")
     if not pd.isna(pts) and not pd.isna(fga):
-        shooting_possessions = 2 * (fga + 0.44 * (0 if pd.isna(fta) else fta))
-        out["Average_TS"] = round(100 * pts / shooting_possessions, 1) if shooting_possessions else np.nan
+        attempts = fga + 0.44 * (0 if pd.isna(fta) else fta)
+        out["Average_TS"] = round(100 * pts / (2 * attempts), 1) if attempts >= MIN_TS_ATTEMPTS else np.nan
 
     ast, tov = total("Assistances"), total("Turnovers")
     if not pd.isna(ast) and not pd.isna(tov):
         out["Average_AstTo"] = round(ast / tov, 2) if tov else np.nan
 
-    if "Usage%" in window.columns and "MinutesPlayed" in window.columns:
-        usage = pd.to_numeric(window["Usage%"], errors="coerce")
-        minutes = pd.to_numeric(window["MinutesPlayed"], errors="coerce")
-        valid = usage.notna() & minutes.notna() & (minutes > 0)
-        if valid.any():
-            out["Average_Usage"] = round(
-                float((usage[valid] * minutes[valid]).sum() / minutes[valid].sum()), 1
-            )
+    if {"UsePoss", "TeamPossOn", "MinutesPlayed"} <= set(window.columns):
+        used = pd.to_numeric(window["UsePoss"], errors="coerce")
+        on_floor = pd.to_numeric(window["TeamPossOn"], errors="coerce")
+        valid = used.notna() & on_floor.notna() & (on_floor > 0)
+        if valid.any() and total("MinutesPlayed") >= MIN_USAGE_MINUTES:
+            out["Average_Usage"] = round(float(100 * used[valid].sum() / on_floor[valid].sum()), 1)
 
     return out
 
