@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { anchorFrom, anchoredPosition } from '../anchoredPanel';
-import { UserPlus, Check, Search } from 'lucide-react';
+import { UserPlus, Check } from 'lucide-react';
+import SearchInput from './SearchInput';
 
 /**
  * Multi-select for choosing which players a chart draws.
@@ -78,18 +79,15 @@ export default function PlayerPicker({ players, selected, onChange, max }) {
                     style={anchoredPosition(anchor, 320)}
                     className="z-[70] w-[min(320px,calc(100vw-16px))] rounded-xl bg-[#16161a] border border-white/10 shadow-2xl p-2"
                 >
-                    <div className="flex items-center gap-2 px-2 py-1.5 mb-1 rounded-lg bg-[#ffffff05]">
-                        <Search size={13} className="text-gray-500 shrink-0" />
-                        <input
-                            ref={searchRef}
-                            type="text"
-                            value={query}
-                            onChange={(e) => setQuery(e.target.value)}
-                            placeholder="Search player or team"
-                            className="bg-transparent text-sm text-gray-200 placeholder:text-gray-600
-                                       outline-none w-full"
-                        />
-                    </div>
+                    <SearchInput
+                        className="mb-1"
+                        inputRef={searchRef}
+                        value={query}
+                        onChange={setQuery}
+                        placeholder="Search player or team"
+                        inputClassName="w-full px-2 py-1.5 rounded-lg bg-[#ffffff05] text-sm text-gray-200
+                                        placeholder:text-gray-600 outline-none"
+                    />
 
                     <div className="flex items-center justify-between px-2 pb-1.5">
                         <span className="text-[10px] uppercase tracking-wider text-gray-600 font-semibold">

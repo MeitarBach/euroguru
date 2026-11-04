@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { X, Search, Check, Lock } from 'lucide-react';
+import { X, Check, Lock } from 'lucide-react';
 import { GameStatus } from './GameStrip';
 import { euroleagueCode } from '../../lib/live/teams';
+import { nameMatches } from '../../lib/live/names';
+import SearchInput from '../SearchInput';
 import { useAuth } from '../../hooks/authContext';
 
 const fold = (text) => String(text ?? '').normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase();
@@ -133,7 +135,7 @@ export default function LivePicker({ roster, games, focusGame, watch, group, rou
         const q = fold(query.trim());
         if (!q) return null;
         return roster
-            .filter(p => fold(p.PlayerName).includes(q) || fold(euroleagueCode(p)) === q || fold(p.Team) === q)
+            .filter(p => nameMatches(q, p.PlayerName) || fold(euroleagueCode(p)) === q || fold(p.Team) === q)
             .sort(byAverage)
             .slice(0, 60);
     }, [query, roster]);
@@ -189,16 +191,13 @@ export default function LivePicker({ roster, games, focusGame, watch, group, rou
                     )}
 
                     <div className="flex flex-col sm:flex-row gap-2">
-                        <label className="relative flex-1">
-                            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
-                            <input
-                                ref={searchRef}
-                                value={query}
-                                onChange={(e) => setQuery(e.target.value)}
-                                placeholder="Search any player or team code"
-                                className="input-dark w-full pl-9"
-                            />
-                        </label>
+                        <SearchInput
+                            className="flex-1"
+                            inputRef={searchRef}
+                            value={query}
+                            onChange={setQuery}
+                            placeholder="Search any player or team code"
+                        />
                         {!results && (
                             <div className="flex rounded-lg border border-white/10 p-0.5 text-sm shrink-0">
                                 {[['round', `Round ${round} games`], ['teams', 'All teams']].map(([id, label]) => (

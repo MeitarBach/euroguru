@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { fetchFilters, fetchStats } from '../services/api';
-import { Search, Filter, Download, List, TrendingUp, BarChart2 } from 'lucide-react';
+import { Filter, Download, List, TrendingUp, BarChart2 } from 'lucide-react';
 import useDebouncedValue from '../hooks/useDebouncedValue';
 import { statusOf } from '../injuries';
 import { useOpenPlayer } from '../hooks/playerDetailContext';
 import InfoTip from './InfoTip';
+import SearchInput from './SearchInput';
 import ColumnPicker from './ColumnPicker';
 import CrRangeSlider from './CrRangeSlider';
 import GamesWindowSelect from './GamesWindowSelect';
@@ -15,6 +16,7 @@ import {
     loadStoredColumns, storeColumns,
 } from '../columns';
 import { useIsNarrow } from '../hooks/useMediaQuery';
+import { nameMatches } from '../lib/live/names';
 import { useGate } from '../hooks/authContext';
 import { GateFade, LockedControl } from './Gate';
 import { PREVIEW_ROWS, BLURRED_ROWS, BLURRED_ROW } from '../lib/gate';
@@ -94,6 +96,12 @@ export default function StatsView() {
 
     const [players, setPlayers] = useState([]);
     const [loading, setLoading] = useState(false);
+
+    // Every player who has played: a stats table is where you look a player up, and
+    // the "more than half of his club's games" bar hid K. Nunn (3 of PAO's 9, back from
+    // injury) from it altogether. The Games column shows how big each sample is; the
+    // rankings (Dashboard, Recommendations, Matchups, Court Vision) keep the bar.
+    const [query, setQuery] = useState('');
 
     // Sorting State. Null key means "use the order the server sent", which is
     // already sorted by score - the previous default named a raw-mode key that does
@@ -180,9 +188,10 @@ export default function StatsView() {
             min_cr: locked ? view.min_cr : minCr,
             max_cr: locked ? view.max_cr : maxCr,
             last_x_games: games,
-            // Only players with more than half of their club's games: one big night
-            // should not top the table.
-            regulars_only: true,
+            // Everyone for a signed-in user (see query above). The signed-out preview is
+            // a fixed top-of-the-table in score order, where one big night should not
+            // sit on top - so it keeps to players with more than half of their club's games.
+            regulars_only: locked,
         };
 
         const data = await fetchStats(params);
@@ -246,11 +255,17 @@ export default function StatsView() {
         return sortableItems;
     }, [players, sort]);
 
+    const searchedPlayers = useMemo(() => {
+        const q = query.trim();
+        if (locked || !q) return sortedPlayers;
+        return sortedPlayers.filter(p => nameMatches(q, p.PlayerName));
+    }, [sortedPlayers, query, locked]);
+
     // The preview rows in full, then a few blurred ones so the wall visibly sits on
     // top of real data rather than at the end of it.
     const shownPlayers = locked
         ? sortedPlayers.slice(0, PREVIEW_ROWS.stats + BLURRED_ROWS)
-        : sortedPlayers;
+        : searchedPlayers;
 
     // Which columns this season can actually fill. 2024 never recorded assists or
     // shooting splits, and the fantasy-sourced season has no minutes at all, so those
@@ -356,6 +371,19 @@ export default function StatsView() {
                         onChange={({ min, max }) => setFilters(prev => ({ ...prev, min_cr: min, max_cr: max }))}
                     />
                 </LockedControl>
+
+                <LockedControl reason="Search any player">
+                    <div className="flex flex-col gap-1">
+                        <label htmlFor="stats-search" className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Player</label>
+                        <SearchInput
+                            id="stats-search"
+                            value={query}
+                            onChange={setQuery}
+                            placeholder="Search a player"
+                            inputClassName="input-dark bg-[#0a0a0c] w-[180px]"
+                        />
+                    </div>
+                </LockedControl>
             </div>
 
             {loading && players.length === 0 && (
@@ -434,7 +462,7 @@ export default function StatsView() {
                                         </tr>
                                     ))}
 
-                                {sortedPlayers.length === 0 && (
+                                {shownPlayers.length === 0 && (
                                     <tr>
                                         <td colSpan={visibleColumns.length} className="px-4 py-12 text-center text-gray-500">
                                             No players found matching these filters.
