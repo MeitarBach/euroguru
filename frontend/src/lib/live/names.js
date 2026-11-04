@@ -73,3 +73,24 @@ export function matchLines(roster, lines) {
     }
     return out;
 }
+
+const fold = (text) => String(text ?? '').normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase();
+
+/**
+ * Whether a typed search finds this player.
+ *
+ * The app knows most players the way the fantasy game writes them ("K. Nunn"), and
+ * nobody types an initial. So a first name and surname find him by initial + surname -
+ * "kendrick nunn" and "nunn, kendrick" both reach K. Nunn - and `fullName`, when the
+ * caller has EuroLeague's spelling ("Kendrick Nunn"), is searched too, which is what
+ * lets a first name alone find him.
+ */
+export function nameMatches(query, name, fullName) {
+    const q = fold(query).trim();
+    if (!q) return true;
+    if (fold(name).includes(q) || (fullName && fold(fullName).includes(q))) return true;
+    if (!/[\s,]/.test(q)) return false;
+    const typed = nameParts(q);
+    const own = nameParts(name);
+    return !!typed.initial && typed.initial === own.initial && own.surname.includes(typed.surname);
+}
