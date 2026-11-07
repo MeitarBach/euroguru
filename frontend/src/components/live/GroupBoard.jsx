@@ -124,8 +124,8 @@ export function GroupBoard({ round, groups, selectedId, onSelect, onCreate, noun
     );
 }
 
-/** The open group's name, with renaming and (two-step) deleting. */
-export function GroupHeader({ group, canDelete, onRename, onDelete, onShare }) {
+/** The open group's name, with renaming and (two-step) deleting - neither when `readOnly`. */
+export function GroupHeader({ group, canDelete, onRename, onDelete, onShare, readOnly = false }) {
     const [editing, setEditing] = useState(false);
     const [confirming, setConfirming] = useState(false);
 
@@ -149,14 +149,16 @@ export function GroupHeader({ group, canDelete, onRename, onDelete, onShare }) {
                     {fixed(group.sums.total)} FPT
                     {group.sums.toPlay > 0 && ` · ${group.sums.toPlay} to play`}
                 </span>
-                <button
-                    type="button"
-                    onClick={() => setEditing(true)}
-                    aria-label="Rename group"
-                    className="p-1 rounded-md text-gray-600 hover:text-white hover:bg-white/5 shrink-0"
-                >
-                    <Pencil size={13} />
-                </button>
+                {!readOnly && (
+                    <button
+                        type="button"
+                        onClick={() => setEditing(true)}
+                        aria-label="Rename group"
+                        className="p-1 rounded-md text-gray-600 hover:text-white hover:bg-white/5 shrink-0"
+                    >
+                        <Pencil size={13} />
+                    </button>
+                )}
             </div>
             <div className="flex items-center gap-1 shrink-0">
             {onShare && !confirming && group.rows.length > 0 && (

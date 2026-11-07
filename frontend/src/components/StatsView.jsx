@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { fetchFilters, fetchStats } from '../services/api';
+import { fetchFilters, fetchStats, fetchHeadshots } from '../services/api';
 import { Filter, Download, List, TrendingUp, BarChart2 } from 'lucide-react';
 import useDebouncedValue from '../hooks/useDebouncedValue';
 import { statusOf } from '../injuries';
@@ -102,6 +102,14 @@ export default function StatsView() {
     // injury) from it altogether. The Games column shows how big each sample is; the
     // rankings (Dashboard, Recommendations, Matchups, Court Vision) keep the bar.
     const [query, setQuery] = useState('');
+    // Full names ("Kendrick Nunn") for the search, which the current season only knows
+    // abbreviated ("K. Nunn"). The archives already spell names out.
+    const [fullNames, setFullNames] = useState({});
+    useEffect(() => {
+        let alive = true;
+        fetchHeadshots(CURRENT_SEASON).then(map => { if (alive && map?.names) setFullNames(map.names); });
+        return () => { alive = false; };
+    }, []);
 
     // Sorting State. Null key means "use the order the server sent", which is
     // already sorted by score - the previous default named a raw-mode key that does
@@ -258,8 +266,9 @@ export default function StatsView() {
     const searchedPlayers = useMemo(() => {
         const q = query.trim();
         if (locked || !q) return sortedPlayers;
-        return sortedPlayers.filter(p => nameMatches(q, p.PlayerName));
-    }, [sortedPlayers, query, locked]);
+        const names = view.season === CURRENT_SEASON ? fullNames : {};
+        return sortedPlayers.filter(p => nameMatches(q, p.PlayerName, names[p.PlayerKey]));
+    }, [sortedPlayers, query, locked, view.season, fullNames]);
 
     // The preview rows in full, then a few blurred ones so the wall visibly sits on
     // top of real data rather than at the end of it.

@@ -1,10 +1,12 @@
 import React from 'react';
 
+const DEFAULT_OPTIONS = [['court', 'Court'], ['cards', 'Cards']];
+
 /** Court | Cards: how a team is drawn - on a half court with photos, or as stat cards. */
-export default function ViewSwitch({ view, onChange }) {
+export default function ViewSwitch({ view, onChange, options = DEFAULT_OPTIONS }) {
     return (
         <div className="inline-flex p-0.5 rounded-lg bg-white/[0.04] border border-white/10 text-xs">
-            {[['court', 'Court'], ['cards', 'Cards']].map(([id, label]) => (
+            {options.map(([id, label]) => (
                 <button
                     key={id}
                     type="button"

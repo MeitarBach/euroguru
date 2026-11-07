@@ -88,7 +88,7 @@ function TeamColumn({ code, name, players, isSelected, isLocked, onToggle, dotsF
  * cuts across all of it, and "All teams" reaches players whose game is another day.
  * A coloured dot marks a player already in one of your other groups.
  */
-export default function LivePicker({ roster, games, focusGame, watch, group, round, teamNames, now, onClose }) {
+export default function LivePicker({ roster, names, games, focusGame, watch, group, round, teamNames, now, onClose }) {
     const { user } = useAuth();
     const [query, setQuery] = useState('');
     const [view, setView] = useState('round');
@@ -135,10 +135,10 @@ export default function LivePicker({ roster, games, focusGame, watch, group, rou
         const q = fold(query.trim());
         if (!q) return null;
         return roster
-            .filter(p => nameMatches(q, p.PlayerName) || fold(euroleagueCode(p)) === q || fold(p.Team) === q)
+            .filter(p => nameMatches(q, p.PlayerName, names?.[p.PlayerKey]) || fold(euroleagueCode(p)) === q || fold(p.Team) === q)
             .sort(byAverage)
             .slice(0, 60);
-    }, [query, roster]);
+    }, [query, roster, names]);
 
     const allTeams = useMemo(() => [...squads.keys()].sort(), [squads]);
 

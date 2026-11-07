@@ -5,12 +5,14 @@ import { CURRENT_SEASON } from '../seasons';
 import useWatchGroups, { GROUP_COLORS } from '../hooks/useWatchGroups';
 import useTeams from '../hooks/useTeams';
 import useRoundLock from '../hooks/useRoundLock';
-import useLeagues from '../hooks/useLeagues';
-import LeagueView, { LeaguesGate, JoinLeagueDialog } from './live/LeagueView';
+import useRooms from '../hooks/useRooms';
+import RoomView, { RoomsDirectory, JoinRoomDialog } from './live/RoomView';
+import RoomChat from './live/RoomChat';
 import TeamCourt from './live/TeamCourt';
 import ViewSwitch from './live/ViewSwitch';
 import { useAuth } from '../hooks/authContext';
-import { TEAM_LIMIT, STARTERS, BENCH, readLeagueCode } from '../lib/leagues';
+import { TEAM_LIMIT, STARTERS, BENCH } from '../lib/teams';
+import { readRoomCode } from '../lib/rooms';
 import useLiveRound from '../hooks/useLiveRound';
 import useNow from '../hooks/useNow';
 import { useOpenPlayer } from '../hooks/playerDetailContext';
@@ -38,9 +40,10 @@ const SEASON_CODE = `E${CURRENT_SEASON}`;
 // for its widest view, so it is usually already cached.
 const ROSTER_QUERY = { season: CURRENT_SEASON, position: 'All', min_cr: 0, max_cr: 100, last_x_games: 100 };
 const SOUND_KEY = 'euroguru.liveSound';
-// Which list the tab shows - your teams or your watchlists - remembered per device.
+// Which list the tab shows - Watch Rooms, your teams or your watchlists - remembered
+// per device. Teams are built and edited in My Teams; here they are watched.
 const MODE_KEY = 'euroguru.liveMode';
-const MODES = [['teams', 'My teams'], ['leagues', 'Leagues'], ['watchlists', 'Watchlists']];
+const MODES = [['rooms', 'Watch Rooms'], ['teams', 'My teams'], ['watchlists', 'Watchlists']];
 // How a team is drawn: on a half court with photos, or as the detailed stat cards.
 const VIEW_KEY = 'euroguru.liveTeamView';
 const loadView = () => {
@@ -58,10 +61,11 @@ const STALE_FEED_MS = 150_000;
 const fixedScore = (x) => x.toFixed(decimalsFor(x));
 
 const loadMode = () => {
-    // A league invite link opens on the leagues.
-    if (readLeagueCode()) return 'leagues';
+    // A room invite link opens on the rooms.
+    if (readRoomCode()) return 'rooms';
     try {
         const saved = window.localStorage.getItem(MODE_KEY);
+        if (saved === 'leagues') return 'rooms'; // leagues became Watch Rooms
         return MODES.some(([id]) => id === saved) ? saved : null;
     } catch {
         return null;
@@ -165,8 +169,7 @@ function LockBanner({ lock, now }) {
 }
 
 /** My teams before there is a team to show: signed out, loading, failed, or none yet. */
-function TeamsGate({ teams, lists, onSignIn, onCreate, onImport, locked }) {
-    const [name, setName] = useState('');
+function TeamsGate({ teams, onSignIn, onMyTeams }) {
     if (!teams.signedIn) {
         return (
             <div className="glass-panel p-6 sm:p-8 text-center">
@@ -176,7 +179,7 @@ function TeamsGate({ teams, lists, onSignIn, onCreate, onImport, locked }) {
                 <h3 className="text-lg font-semibold text-white">Your fantasy teams, saved and live</h3>
                 <p className="mt-1 text-sm text-gray-400 max-w-md mx-auto">
                     Sign in free to save up to {TEAM_LIMIT} teams - {STARTERS} starters, {BENCH} on the bench and a coach -
-                    follow them live, and play them against friends in a league.
+                    follow them live, and watch them with friends in a Watch Room.
                 </p>
                 <button
                     type="button"
@@ -209,51 +212,23 @@ function TeamsGate({ teams, lists, onSignIn, onCreate, onImport, locked }) {
             </div>
         );
     }
-    // A watchlist that is really a team ("My team", built before teams existed).
-    const importable = lists.groups.find(g => g.keys.length > 0);
     return (
         <div className="glass-panel p-6 sm:p-8 text-center">
             <div className="mx-auto mb-3 w-12 h-12 rounded-full flex items-center justify-center bg-purple-500/15 border border-purple-500/30 text-purple-300">
                 <Shirt size={22} />
             </div>
-            <h3 className="text-lg font-semibold text-white">Make your first team</h3>
+            <h3 className="text-lg font-semibold text-white">Build your first team</h3>
             <p className="mt-1 text-sm text-gray-400 max-w-md mx-auto">
-                {STARTERS} starters (one captain counts double), {BENCH} on the bench at half, and a coach. Lineups lock at
-                each round's first tip-off, and a team can join your friends' leagues.
+                Teams are built in My Teams, with each roster's expected score and the budget it takes.
+                Once saved, they play here live and can join Watch Rooms.
             </p>
-            <form
-                className="mt-4 flex items-center justify-center gap-2 max-w-sm mx-auto"
-                onSubmit={(e) => { e.preventDefault(); onCreate(name); setName(''); }}
+            <button
+                type="button"
+                onClick={onMyTeams}
+                className="mt-4 inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium text-white bg-gradient-to-r from-purple-600 to-purple-500 hover:from-purple-500 hover:to-purple-400"
             >
-                <input
-                    value={name}
-                    maxLength={24}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="Team name"
-                    className="input-dark flex-1 min-w-0 py-2 text-sm"
-                />
-                <button
-                    type="submit"
-                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium text-white bg-gradient-to-r from-purple-600 to-purple-500 hover:from-purple-500 hover:to-purple-400"
-                >
-                    <Plus size={15} /> Create
-                </button>
-            </form>
-            {importable && (
-                <div className="mt-5 text-sm text-gray-400">
-                    Or{' '}
-                    <button
-                        type="button"
-                        onClick={() => onImport(importable)}
-                        disabled={locked}
-                        title={locked ? 'Lineups are locked until the round ends' : undefined}
-                        className="font-medium text-purple-300 hover:text-purple-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        turn "{importable.name}" into a team
-                    </button>
-                    {' '}({importable.keys.length} players). The watchlist stays as it is.
-                </div>
-            )}
+                <Shirt size={16} /> Open My Teams
+            </button>
         </div>
     );
 }
@@ -364,12 +339,12 @@ function CoachSlot({ group, coaches, games, history, lastEvent, now, picking, on
  * exactly as the fantasy game does. ?demo replays a finished round instead, for trying
  * the tab when nothing is on.
  */
-export default function LiveView() {
+export default function LiveView({ active = true, intent = null, onNavigate }) {
     const demo = useMemo(() => new URLSearchParams(window.location.search).has('demo'), []);
     const [source] = useState(() => (demo ? demoSource(SEASON_CODE) : euroleagueSource(SEASON_CODE)));
     const [roster, setRoster] = useState(null);
     const [coaches, setCoaches] = useState([]);
-    const [headshots, setHeadshots] = useState({ players: {}, crests: {} });
+    const [headshots, setHeadshots] = useState({ players: {}, names: {}, crests: {} });
     const [teamView, setTeamView] = useState(loadView);
     const changeTeamView = (next) => {
         setTeamView(next);
@@ -395,6 +370,7 @@ export default function LiveView() {
     const [savedMode, setSavedMode] = useState(loadMode);
     // Signed in, your teams come first; signed out, watchlists work without an account.
     const mode = savedMode ?? (user ? 'teams' : 'watchlists');
+    const toMyTeams = () => onNavigate?.('teams');
     const changeMode = (next) => {
         setSavedMode(next);
         setOpenGame(null);
@@ -405,17 +381,38 @@ export default function LiveView() {
     const lock = useRoundLock(CURRENT_SEASON, now);
     const lists = useWatchGroups();
     const teams = useTeams({ lock, notify: flash });
-    const leagues = useLeagues({ season: CURRENT_SEASON, notify: flash });
+    const rooms = useRooms({ notify: flash });
     // The list on screen. Everything is followed live either way, so switching is
-    // instant. In Leagues the editable list (the box score's add menu) is your teams.
+    // instant. Teams are read-only here (My Teams edits them), so the box
+    // score's add menu always works on your watchlists.
     const watch = mode === 'watchlists' ? lists : teams;
     const isTeams = mode === 'teams';
-    const isLeagues = mode === 'leagues';
-    const [leagueTeamId, setLeagueTeamId] = useState(null);
+    const isRooms = mode === 'rooms';
+    const [roomTeamId, setRoomTeamId] = useState(null);
+    // A public room you asked to join: its board, shown in the join dialog.
+    const [joining, setJoining] = useState(null);
 
-    // The open league's teams, shaped like groups: lineups as saved at the lock (null
+    // Teams change in My Teams while this tab stays mounted: catch up on return.
+    const wasActive = useRef(active);
+    useEffect(() => {
+        if (active && !wasActive.current) { teams.reload(); rooms.reload(); rooms.refreshBoard(); }
+        wasActive.current = active;
+    }, [active]); // eslint-disable-line react-hooks/exhaustive-deps -- reloads are stable; only the switch matters
+
+    // Another tab sent us here for something: "Bring to a Watch Room" from My Teams.
+    // Adjusted while rendering, once per request, rather than in an effect.
+    const [seenIntent, setSeenIntent] = useState(intent);
+    if (intent !== seenIntent) {
+        setSeenIntent(intent);
+        if (intent?.mode) {
+            setSavedMode(intent.mode);
+            setOpenGame(null);
+        }
+    }
+
+    // The open room's teams, shaped like groups: lineups as saved at the lock (null
     // before it - the database does not reveal them earlier).
-    const leagueRaw = useMemo(() => (leagues.board?.teams ?? []).map((t, i) => ({
+    const roomRaw = useMemo(() => (rooms.board?.teams ?? []).map((t, i) => ({
         id: t.team_id,
         name: `${t.name} · ${t.nickname}`,
         teamName: t.name,
@@ -427,16 +424,16 @@ export default function LiveView() {
         bench: t.lineup?.bench ?? [],
         captain: t.lineup?.captain ?? null,
         coach: t.lineup?.coach ?? null,
-    })), [leagues.board]);
+    })), [rooms.board]);
 
     // An invite link opened signed out: ask to sign in, once.
     const askedSignIn = useRef(false);
     useEffect(() => {
-        if (leagues.inviteCode && !user && !authLoading && !askedSignIn.current) {
+        if (rooms.inviteCode && !user && !authLoading && !askedSignIn.current) {
             askedSignIn.current = true;
-            openAuth('Sign in to join this league');
+            openAuth('Sign in to join this Watch Room');
         }
-    }, [leagues.inviteCode, user, authLoading, openAuth]);
+    }, [rooms.inviteCode, user, authLoading, openAuth]);
     const openPlayer = useOpenPlayer();
 
     useEffect(() => {
@@ -449,13 +446,13 @@ export default function LiveView() {
     const coachByKey = useMemo(() => new Map(coaches.map(c => [coachKey(c), c])), [coaches]);
     // Everyone in a team or a watchlist, and every coach either has, for the live loop.
     const followedKeys = useMemo(
-        () => [...new Set([...teams.allKeys, ...lists.allKeys, ...leagueRaw.flatMap(g => g.keys)])],
-        [teams.allKeys, lists.allKeys, leagueRaw],
+        () => [...new Set([...teams.allKeys, ...lists.allKeys, ...roomRaw.flatMap(g => g.keys)])],
+        [teams.allKeys, lists.allKeys, roomRaw],
     );
-    const watchCoaches = useMemo(() => [...new Set([...teams.groups, ...lists.groups, ...leagueRaw].map(g => g.coach).filter(Boolean))]
+    const watchCoaches = useMemo(() => [...new Set([...teams.groups, ...lists.groups, ...roomRaw].map(g => g.coach).filter(Boolean))]
         .map(key => coachByKey.get(key))
         .filter(Boolean)
-        .map(c => ({ key: coachKey(c), code: c.TeamCode, name: c.CoachName })), [teams.groups, lists.groups, leagueRaw, coachByKey]);
+        .map(c => ({ key: coachKey(c), code: c.TeamCode, name: c.CoachName })), [teams.groups, lists.groups, roomRaw, coachByKey]);
 
     // A big play chimes - when the viewer has turned sound on.
     const soundOn = useRef(sound);
@@ -518,12 +515,13 @@ export default function LiveView() {
         };
     }), [rowByKey, coachByKey, live.games]);
     const groups = useMemo(() => scoreGroups(watch.groups), [scoreGroups, watch.groups]);
-    const leagueGroups = useMemo(() => scoreGroups(leagueRaw), [scoreGroups, leagueRaw]);
-    const leagueTeam = leagueGroups.find(g => g.id === leagueTeamId)
-        ?? leagueGroups.find(g => g.mine) ?? leagueGroups[0] ?? null;
+    const listGroups = useMemo(() => scoreGroups(lists.groups), [scoreGroups, lists.groups]);
+    const roomGroups = useMemo(() => scoreGroups(roomRaw), [scoreGroups, roomRaw]);
+    const roomTeam = roomGroups.find(g => g.id === roomTeamId)
+        ?? roomGroups.find(g => g.mine) ?? roomGroups[0] ?? null;
     // Null only in My teams with no team yet (or signed out): TeamsGate shows instead.
     const group = groups.find(g => g.id === watch.selected?.id) ?? groups[0] ?? null;
-    const shownGroups = isLeagues ? leagueGroups : groups;
+    const shownGroups = isRooms ? roomGroups : groups;
     const groupsOf = useCallback(
         (key) => shownGroups.filter(g => g.keys.includes(key) || g.coach === key),
         [shownGroups],
@@ -565,14 +563,14 @@ export default function LiveView() {
 
     const loading = live.status === 'loading' || roster === null;
 
-    const board = isLeagues ? (leagues.selected && (
+    const board = isRooms ? (rooms.board && (
         <GroupBoard
             round={live.round}
-            groups={leagueGroups}
-            selectedId={leagueTeam?.id}
-            onSelect={(id) => { setLeagueTeamId(id); setOpenGame(null); }}
+            groups={roomGroups}
+            selectedId={roomTeam?.id}
+            onSelect={(id) => { setRoomTeamId(id); setOpenGame(null); }}
             onCreate={null}
-            noun="league table"
+            noun="room board"
         />
     )) : group && (
         <GroupBoard
@@ -580,11 +578,9 @@ export default function LiveView() {
             groups={groups}
             selectedId={group.id}
             onSelect={(id) => { watch.select(id); setOpenGame(null); }}
-            // A new watchlist is empty by definition, so go straight to filling it. A new
-            // team arrives once the database has it, and opens then.
-            onCreate={isTeams
-                ? (teams.full ? null : (name) => teams.create(name))
-                : (name) => { lists.create(name); openPicker(); }}
+            // A new watchlist is empty by definition, so go straight to filling it. New
+            // teams are made in My Teams.
+            onCreate={isTeams ? null : (name) => { lists.create(name); openPicker(); }}
             noun={isTeams ? 'teams' : 'watchlists'}
             placeholder={isTeams ? 'Team name' : "e.g. Dana's team"}
         />
@@ -624,18 +620,27 @@ export default function LiveView() {
                     >
                         {sound ? <Volume2 size={16} /> : <VolumeX size={16} />}
                     </button>
-                    <button
-                        type="button"
-                        onClick={() => openPicker()}
-                        disabled={loading || !group || isLeagues || (isTeams && lock.locked)}
-                        title={isTeams && lock.locked ? `Lineups are locked for Round ${lock.round}` : undefined}
-                        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium text-white bg-gradient-to-r from-purple-600 to-purple-500 hover:from-purple-500 hover:to-purple-400 disabled:opacity-50"
-                    >
-                        <UserPlus size={16} /> Add players
-                        {watch.limit && (
-                            <span className="text-[11px] text-purple-200/80">{watch.allKeys.length}/{watch.limit}</span>
-                        )}
-                    </button>
+                    {mode === 'watchlists' ? (
+                        <button
+                            type="button"
+                            onClick={() => openPicker()}
+                            disabled={loading || !group}
+                            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium text-white bg-gradient-to-r from-purple-600 to-purple-500 hover:from-purple-500 hover:to-purple-400 disabled:opacity-50"
+                        >
+                            <UserPlus size={16} /> Add players
+                            {watch.limit && (
+                                <span className="text-[11px] text-purple-200/80">{watch.allKeys.length}/{watch.limit}</span>
+                            )}
+                        </button>
+                    ) : (
+                        <button
+                            type="button"
+                            onClick={toMyTeams}
+                            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium text-white bg-gradient-to-r from-purple-600 to-purple-500 hover:from-purple-500 hover:to-purple-400"
+                        >
+                            <Shirt size={16} /> My Teams
+                        </button>
+                    )}
                 </div>
             </header>
 
@@ -669,7 +674,7 @@ export default function LiveView() {
 
                     <div className="flex flex-col gap-3">
                         <ModeSwitch mode={mode} onChange={changeMode} />
-                        {(isTeams || isLeagues) && teams.signedIn && <LockBanner lock={lock} now={now} />}
+                        {(isTeams || isRooms) && teams.signedIn && <LockBanner lock={lock} now={now} />}
                     </div>
 
                     {invite && (
@@ -702,16 +707,11 @@ export default function LiveView() {
                         </div>
                     )}
 
-                    {isLeagues && !leagues.selected && !game ? (
-                        <LeaguesGate leagues={leagues} onSignIn={() => openAuth('Play your teams in a league')} />
-                    ) : !isLeagues && !group && !game ? (
+                    {!isRooms && !group && !game ? (
                         <TeamsGate
                             teams={teams}
-                            lists={lists}
-                            locked={lock.locked}
                             onSignIn={() => openAuth('Save your fantasy teams')}
-                            onCreate={(name) => teams.create(name)}
-                            onImport={(g) => teams.create(g.name, g.keys, { bench: g.bench, captain: g.captain, coach: g.coach })}
+                            onMyTeams={toMyTeams}
                         />
                     ) : (
                     <div className="grid grid-cols-1 xl:grid-cols-3 gap-5 items-start">
@@ -724,21 +724,29 @@ export default function LiveView() {
                                 game={game}
                                 roster={roster}
                                 coaches={coaches}
-                                groups={groups}
+                                groups={listGroups}
                                 groupsOf={groupsOf}
                                 lastEventOf={(key) => lastEvent.get(key)}
                                 now={now}
-                                watch={watch}
+                                watch={lists}
                                 onOpenPlayer={(name) => openPlayer(name, CURRENT_SEASON)}
                                 onBack={() => setOpenGame(null)}
                             />
-                        ) : isLeagues ? (
-                            <LeagueView
-                                leagues={leagues}
+                        ) : isRooms && !rooms.openId ? (
+                            <RoomsDirectory
+                                rooms={rooms}
+                                onSignIn={() => openAuth('Watch the round with friends')}
+                                onMyTeams={toMyTeams}
+                            />
+                        ) : isRooms ? (
+                            <RoomView
+                                rooms={rooms}
                                 myTeams={teams.groups}
-                                groups={leagueGroups}
-                                team={leagueTeam}
-                                onSelectTeam={setLeagueTeamId}
+                                groups={roomGroups}
+                                team={roomTeam}
+                                onSelectTeam={setRoomTeamId}
+                                onJoin={() => rooms.board && setJoining(rooms.board)}
+                                onMyTeams={toMyTeams}
                                 lock={lock}
                                 now={now}
                                 history={live.history}
@@ -755,19 +763,28 @@ export default function LiveView() {
                             <GroupHeader
                                 key={group.id}
                                 group={group}
-                                canDelete={isTeams || groups.length > 1}
+                                // Teams are renamed and deleted in My Teams.
+                                canDelete={!isTeams && groups.length > 1}
+                                readOnly={isTeams}
                                 onRename={(name) => watch.rename(group.id, name)}
                                 // Watchlists share an image and a copy link; teams get a
                                 // live public page instead (phase C).
                                 onShare={isTeams ? null : () => shareGroup(group, live.round).then(flash)}
                                 onDelete={() => watch.destroy(group.id)}
                             />
-                            {isTeams && group.rows.length > 0 && (
-                                <div className="flex justify-end">
-                                    <ViewSwitch view={teamView} onChange={changeTeamView} />
+                            {isTeams && (
+                                <div className="flex items-center justify-between gap-2">
+                                    <button type="button" onClick={toMyTeams} className="inline-flex items-center gap-1.5 text-xs text-purple-300 hover:text-purple-200">
+                                        <Shirt size={13} /> Edit in My Teams
+                                    </button>
+                                    {group.rows.length > 0 && <ViewSwitch view={teamView} onChange={changeTeamView} />}
                                 </div>
                             )}
-                            {group.rows.length === 0 ? (
+                            {group.rows.length === 0 && isTeams ? (
+                                <div className="glass-panel p-6 text-center text-sm text-gray-400">
+                                    {group.name} has no players yet. Pick them in My Teams.
+                                </div>
+                            ) : group.rows.length === 0 ? (
                                 <EmptyState
                                     group={group}
                                     isTeam={isTeams}
@@ -783,25 +800,8 @@ export default function LiveView() {
                                         crests={headshots.crests}
                                         now={now}
                                         lastEvent={lastEvent}
-                                        editable={!lock.locked}
-                                        onToggleCaptain={(key) => watch.toggleCaptain(group.id, key)}
-                                        onToggleBench={(key) => watch.toggleBench(group.id, key)}
-                                        onMakeSixth={(key) => watch.makeSixth(group.id, key)}
-                                        onRemove={(key) => watch.remove(group.id, key)}
                                         onOpenPlayer={(name) => openPlayer(name, CURRENT_SEASON)}
-                                        onAddPlayers={() => openPicker()}
-                                        onPickCoach={() => setCoachPicker(id => (id === group.id ? false : group.id))}
                                     />
-                                    {coachPicker === group.id && (
-                                        <CoachPicker
-                                            coaches={coaches}
-                                            games={live.games}
-                                            selectedKey={group.coachRow?.key ?? null}
-                                            now={now}
-                                            onPick={(key) => { watch.toggleCoach(group.id, key); closeCoachPicker(); }}
-                                            onClose={closeCoachPicker}
-                                        />
-                                    )}
                                 </div>
                             ) : (
                                 <LayoutGroup id={group.id}>
@@ -829,9 +829,9 @@ export default function LiveView() {
                                                         lastEvent={lastEvent.get(row.key)}
                                                         now={now}
                                                         alsoIn={groupsOf(row.key).filter(g => g.id !== group.id)}
-                                                        onRemove={() => watch.remove(group.id, row.key)}
-                                                        onToggleBench={() => watch.toggleBench(group.id, row.key)}
-                                                        onToggleCaptain={() => watch.toggleCaptain(group.id, row.key)}
+                                                        onRemove={isTeams ? undefined : () => watch.remove(group.id, row.key)}
+                                                        onToggleBench={isTeams ? undefined : () => watch.toggleBench(group.id, row.key)}
+                                                        onToggleCaptain={isTeams ? undefined : () => watch.toggleCaptain(group.id, row.key)}
                                                         onOpen={() => openPlayer(row.player.PlayerName, CURRENT_SEASON)}
                                                     />
                                                 ))}
@@ -840,7 +840,7 @@ export default function LiveView() {
                                     ))}
                                 </LayoutGroup>
                             )}
-                            {!(isTeams && teamView === 'court' && group.rows.length > 0) && <CoachSlot
+                            {!isTeams && <CoachSlot
                                 group={group}
                                 coaches={coaches}
                                 games={live.games}
@@ -857,6 +857,16 @@ export default function LiveView() {
 
                         <aside className="space-y-4">
                             <div className="hidden xl:block">{board}</div>
+                            {isRooms && rooms.board && (
+                                <RoomChat
+                                    key={rooms.board.id}
+                                    board={rooms.board}
+                                    userId={user?.id ?? null}
+                                    now={now}
+                                    notify={flash}
+                                    onJoin={() => setJoining(rooms.board)}
+                                />
+                            )}
                             <ActivityFeed
                                 title={game ? `${game.homeCode} vs ${game.awayCode}` : null}
                                 events={feed}
@@ -875,20 +885,24 @@ export default function LiveView() {
                 </div>
             )}
 
-            {leagues.invite && (
-                <JoinLeagueDialog
-                    key={`${leagues.invite.code}:${teams.groups.length}`}
-                    invite={leagues.invite}
+            {(rooms.invite || joining) && (
+                <JoinRoomDialog
+                    key={`${(rooms.invite ?? joining).id}:${teams.groups.length}`}
+                    room={rooms.invite ?? joining}
                     myTeams={teams.groups}
                     onCreateTeam={(name) => teams.create(name)}
-                    onJoin={async (ids) => { if (await leagues.join(ids)) changeMode('leagues'); }}
-                    onClose={leagues.dismissInvite}
+                    onJoin={async (ids) => {
+                        const room = rooms.invite ?? joining;
+                        if (await rooms.join(room, ids, room.code ?? null)) { setJoining(null); changeMode('rooms'); }
+                    }}
+                    onClose={() => { if (rooms.invite) rooms.dismissInvite(); setJoining(null); }}
                 />
             )}
 
             {picker.open && roster && group && (
                 <LivePicker
                     roster={roster}
+                    names={headshots.names}
                     games={live.games}
                     focusGame={picker.game}
                     watch={watch}

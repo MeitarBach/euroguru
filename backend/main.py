@@ -12,6 +12,9 @@ from utils.cr_history import cr_history_payload
 from utils.defense_vs_position import defense_vs_position_payload
 from utils.coaches import coaches_payload
 from utils.headshots import headshots_payload
+from utils.expected import cached_expected_payload
+from utils.round_scores import round_scores_payload
+from utils.s3_utils import list_bucket
 from utils.auth import optional_user
 
 app = FastAPI(title="EuroGuru API")
@@ -356,12 +359,40 @@ def get_defense_vs_position(
     return payload
 
 
+@app.get("/api/expected")
+def get_expected(season: str = DEFAULT_SEASON):
+    """
+    The Team Optimizer's numbers: what every priced player and every coach is expected
+    to score in the next round, keyed like the Live tab's lineups ("id:<n>" players,
+    "coach:<n>" coaches). See utils/expected.py for the model and its backtest.
+    """
+    if season not in DATA_FILES:
+        raise HTTPException(status_code=404, detail="Season not found")
+    try:
+        return cached_expected_payload(season, lambda: get_data(season), list_bucket())
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="The schedule is not built for this season yet")
+
+
+@app.get("/api/round-scores")
+def get_round_scores(season: str = DEFAULT_SEASON):
+    """
+    My Teams' Round dropdown: every player's FPT and every club's margin, round by
+    round, so a roster can be replayed on any played round. See utils/round_scores.py.
+    """
+    if season not in DATA_FILES:
+        raise HTTPException(status_code=404, detail="Season not found")
+    return round_scores_payload(get_data(season))
+
+
 @app.get("/api/headshots")
 def get_headshots(season: str = DEFAULT_SEASON):
     """
-    Official photos for the Live tab's court view: {players: {PlayerKey: url}, crests:
-    {club: url}}. Matched from EuroLeague's rosters - see utils/headshots.py, which keeps
-    the answer for half a day; edge_cache above covers the CDN side like every route.
+    Official photos for the Live tab's court view: {players: {PlayerKey: url}, names:
+    {PlayerKey: full name}, crests: {club: url}}. The names are what the player searches
+    match a typed "Kendrick" against. Matched from EuroLeague's rosters - see
+    utils/headshots.py, which keeps the answer for half a day; edge_cache above covers
+    the CDN side like every route.
     """
     return headshots_payload(season, get_data(season))
 

@@ -32,3 +32,22 @@ export const db = auth
         fetch: authedFetch,
     })
     : null;
+
+/**
+ * A query's rows, or a throw with the database's message - and its `hint` (locked,
+ * team_cap, room_full, bad_invite, not_found, chat_closed, too_fast, ...) and code on
+ * the error, so the UI can say the right thing.
+ */
+export async function run(query) {
+    if (!db) fail({ message: 'Accounts are not available in this build' });
+    const { data, error } = await query;
+    if (error) fail(error);
+    return data;
+}
+
+function fail(error) {
+    const e = new Error(error?.message || 'Something went wrong');
+    e.hint = error?.hint ?? null;
+    e.code = error?.code ?? null;
+    throw e;
+}

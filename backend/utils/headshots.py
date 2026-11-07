@@ -8,7 +8,9 @@ fantasy game's id and an abbreviated name, so the two are joined the way the soc
 cards' headshot() does it - club + initial + surname, then looser - and a match counts
 only when exactly one person fits, which keeps namesakes (two C. Joneses) apart.
 
-Clubs come along too: coaches have no photo, so their tile shows the club's crest.
+Clubs come along too: coaches have no photo, so their tile shows the club's crest. So do
+the players' full names ("Kendrick Nunn" for the fantasy game's "K. Nunn"), which the
+player searches match against - nobody types an initial.
 
 Kept in memory for half a day per season; the endpoint is edge-cached on top of that,
 so EuroLeague is asked about once a day. A failure answers empty maps - the court falls
@@ -41,8 +43,14 @@ def _key(name):
     return f"{initial}|{' '.join(w for w in surname.split() if w not in SUFFIXES)}"
 
 
+def _full_name(name):
+    """EuroLeague's "NUNN, KENDRICK" / "WRIGHT IV, MCKINLEY" as "Kendrick Nunn" / "Mckinley Wright Iv"."""
+    last, _, first = str(name).partition(",")
+    return " ".join(f"{first.strip()} {last.strip()}".split()).title()
+
+
 def _people(season):
-    """[{club, key, surname, code, url, active}] for everyone with a headshot, and {club: crest}."""
+    """[{club, key, surname, code, name, url, active}] for everyone with a headshot, and {club: crest}."""
     res = requests.get(PEOPLE_URL.format(season=season), timeout=10)
     res.raise_for_status()
     people, crests = [], {}
@@ -57,7 +65,8 @@ def _people(season):
             continue
         key = _key(row["person"]["name"])
         people.append({"club": code, "key": key, "surname": key.split("|", 1)[1],
-                       "code": row["person"]["code"], "url": url, "active": row.get("active")})
+                       "code": row["person"]["code"], "name": _full_name(row["person"]["name"]),
+                       "url": url, "active": row.get("active")})
     return people, crests
 
 
@@ -79,7 +88,8 @@ def _match(name, club, people):
 
 
 def headshots_payload(season, df):
-    """{"players": {PlayerKey: url}, "crests": {club code: url}} for the season's priced players."""
+    """{"players": {PlayerKey: url}, "names": {PlayerKey: full name}, "crests": {club code: url}}
+    for the season's priced players."""
     season = str(season)
     with _lock:
         hit = _cache.get(season)
@@ -90,9 +100,9 @@ def headshots_payload(season, df):
         people, crests = _people(season)
     except Exception as exc:  # a missing photo is a cosmetic loss, not a failed page
         print(f"[headshots] people API unavailable for {season}: {exc}")
-        return {"players": {}, "crests": {}}
+        return {"players": {}, "names": {}, "crests": {}}
 
-    players = {}
+    players, names = {}, {}
     if not df.empty and {"PlayerKey", "PlayerName", "TeamCode"} <= set(df.columns):
         roster = df[df["CR"].notna()] if "CR" in df.columns else df
         # The latest club of each player, as calculate_player_averages reports it.
@@ -104,8 +114,9 @@ def headshots_payload(season, df):
             person = _match(row["PlayerName"], club, people)
             if person:
                 players[key] = person["url"]
+                names[key] = person["name"]
 
-    payload = {"players": players, "crests": crests}
+    payload = {"players": players, "names": names, "crests": crests}
     with _lock:
         _cache[season] = (time.time(), payload)
     return payload

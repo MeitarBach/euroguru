@@ -144,7 +144,7 @@ export const fetchHeadshots = (season) =>
     cached(
         `headshots:${season}`,
         () => client.get(`${API_URL}/headshots`, { params: { season } }),
-        { players: {}, crests: {} }
+        { players: {}, names: {}, crests: {} }
     );
 
 // The season's head coaches (name, club, CR) for the Live tab's coach slot. Empty when
@@ -154,6 +154,25 @@ export const fetchCoaches = (season) =>
         `coaches:${season}`,
         () => client.get(`${API_URL}/coaches`, { params: { season } }),
         []
+    );
+
+// My Teams' numbers: every priced player's and coach's expected FPT for the
+// next round, keyed like a lineup ("id:<n>", "coach:<n>"). See backend/utils/expected.py.
+export const fetchExpected = (season) =>
+    cached(
+        `expected:${season}`,
+        () => client.get(`${API_URL}/expected`, { params: { season } }),
+        { round: null, players: {}, coaches: {} }
+    );
+
+// My Teams' Round dropdown: every player's FPT ({ "id:<n>": { "<round>": { fpt, min } } })
+// and every club's margin ({ code: { "<round>": { margin, opp, home } } }) per played
+// round. See backend/utils/round_scores.py.
+export const fetchRoundScores = (season) =>
+    cached(
+        `roundScores:${season}`,
+        () => client.get(`${API_URL}/round-scores`, { params: { season } }),
+        { rounds: [], players: {}, clubs: {} }
     );
 
 export const fetchRecommendations = (params) =>

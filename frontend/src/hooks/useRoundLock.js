@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { listRounds } from '../lib/leagues';
+import { listRounds } from '../lib/teams';
 import { db } from '../lib/db';
 
 /**
