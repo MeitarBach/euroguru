@@ -32,12 +32,16 @@ function PlayerLine({ row, editable, past, onAction, onOpenPlayer }) {
                     <span className="truncate">{p?.PlayerName ?? 'Unknown player'}</span>
                     <Injury status={row.injury} />
                 </span>
-                <span className="block text-[11px] text-gray-500 truncate">
-                    {p ? euroleagueCode(p) : ''} · {past
-                        ? <span className={change.tone} title="Price change with this round">{change.text} CR</span>
-                        : <>{one(p?.CR)} CR</>} · {ROLE_LABEL[row.role]}
+                {/* The details wrap between their parts on a narrow screen rather than being cut off. */}
+                <span className="flex flex-wrap gap-x-2 text-[11px] text-gray-500">
+                    <span className="whitespace-nowrap">
+                        {p ? euroleagueCode(p) : ''} · {past
+                            ? <span className={change.tone} title="Price change with this round">{change.text} CR</span>
+                            : <>{one(p?.CR)} CR</>}
+                    </span>
+                    <span className="whitespace-nowrap">{ROLE_LABEL[row.role]}</span>
                     {row.avail && row.avail[1] > 0 && row.avail[0] < row.avail[1] && (
-                        <span className="text-amber-300/80"> · played {row.avail[0]} of {row.avail[1]}</span>
+                        <span className="whitespace-nowrap text-amber-300/80">played {row.avail[0]} of {row.avail[1]}</span>
                     )}
                 </span>
             </button>
@@ -140,36 +144,41 @@ export default function LineupEditor({ outlook, editable, past = null, onAction,
 
             <Section title="Coach" note="scores his club's margin - counted at his most likely score" total={past !== null ? coach?.points : o ? coachExpected(o) : undefined}>
                 {coach ? (
-                    <div className="flex items-center gap-2.5 px-3 py-2 rounded-lg border border-violet-500/25 bg-violet-500/[0.04]">
-                        <span className="w-6 text-center px-1 rounded bg-violet-500/20 text-violet-200 text-[10px] font-bold shrink-0">HC</span>
-                        <span className="min-w-0 flex-1">
-                            <span className="block text-sm text-white truncate">{coach.coach?.CoachName ?? 'Unknown coach'}</span>
-                            <span className="block text-[11px] text-gray-500 truncate">
-                                {coach.coach?.TeamCode ?? ''} · {one(coach.coach?.CR)} CR
-                                {past !== null
-                                    ? (game ? <> · {marginText(game.margin, true)} {game.home ? 'vs' : '@'} {game.opp}</> : ' · no game')
-                                    : o?.opp ? <> · {o.home ? 'vs' : '@'} {o.opp} · {pct(o.win)} to win</> : ' · no game'}
+                    <div className="px-3 py-2 rounded-lg border border-violet-500/25 bg-violet-500/[0.04]">
+                        <div className="flex items-center gap-2.5">
+                            <span className="w-6 text-center px-1 rounded bg-violet-500/20 text-violet-200 text-[10px] font-bold shrink-0">HC</span>
+                            <span className="min-w-0 flex-1">
+                                <span className="block text-sm text-white truncate">{coach.coach?.CoachName ?? 'Unknown coach'}</span>
+                                <span className="flex flex-wrap gap-x-2 text-[11px] text-gray-500">
+                                    <span className="whitespace-nowrap">{coach.coach?.TeamCode ?? ''} · {one(coach.coach?.CR)} CR</span>
+                                    <span className="whitespace-nowrap">
+                                        {past !== null
+                                            ? (game ? <>{marginText(game.margin, true)} {game.home ? 'vs' : '@'} {game.opp}</> : 'no game')
+                                            : o?.opp ? <>{o.home ? 'vs' : '@'} {o.opp} · {pct(o.win)} to win</> : 'no game'}
+                                    </span>
+                                </span>
                             </span>
-                            {past === null && <CoachOdds outlook={o} className="mt-1" />}
-                        </span>
-                        <span className="text-right shrink-0">
-                            <span className="block font-mono text-sm text-white tabular-nums">
-                                {past !== null ? one(coach.points) : coachScore(coachExpected(o))}
+                            <span className="text-right shrink-0">
+                                <span className="block font-mono text-sm text-white tabular-nums">
+                                    {past !== null ? one(coach.points) : coachScore(coachExpected(o))}
+                                </span>
+                                <span className="block text-[10px] text-gray-600">
+                                    {past !== null ? `Round ${past}` : o?.opp ? `most likely · ${pct(o.chance)}` : 'expected'}
+                                </span>
                             </span>
-                            <span className="block text-[10px] text-gray-600">
-                                {past !== null ? `Round ${past}` : o?.opp ? `most likely · ${pct(o.chance)}` : 'expected'}
-                            </span>
-                        </span>
-                        {editable && (
-                            <span className="flex items-center shrink-0">
-                                <button type="button" onClick={() => onPick('coach')} title="Change coach" className={iconBtn}>
-                                    <ArrowDown size={14} className="rotate-90" />
-                                </button>
-                                <button type="button" onClick={onRemoveCoach} title="Remove" className={`${iconBtn} hover:!text-red-300`}>
-                                    <X size={14} />
-                                </button>
-                            </span>
-                        )}
+                            {editable && (
+                                <span className="flex items-center shrink-0">
+                                    <button type="button" onClick={() => onPick('coach')} title="Change coach" className={iconBtn}>
+                                        <ArrowDown size={14} className="rotate-90" />
+                                    </button>
+                                    <button type="button" onClick={onRemoveCoach} title="Remove" className={`${iconBtn} hover:!text-red-300`}>
+                                        <X size={14} />
+                                    </button>
+                                </span>
+                            )}
+                        </div>
+                        {/* Under the name (the badge's width + the gap in): six chips need the row's width on a phone. */}
+                        {past === null && <CoachOdds outlook={o} className="mt-1.5 pl-[34px]" />}
                     </div>
                 ) : (
                     <Slot label="Pick a coach" editable={editable} onClick={() => onPick('coach')} />

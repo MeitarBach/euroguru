@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EuroGuru model research</title>
+<style>
+  :root { --bg:#fafafa; --panel:#fff; --text:#1a1a1f; --muted:#666b78; --line:#e3e4ea; --accent:#7c3aed; --good:#0f8a5f; --warn:#b45309; --bar:#c4b5fd; --barcur:#9ca3af; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0b0b0f; --panel:#15151c; --text:#ececf1; --muted:#9a9fad; --line:#2a2a35; --accent:#a78bfa; --good:#34d399; --warn:#fbbf24; --bar:#6d4fd6; --barcur:#5b6070; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:16px/1.6 -apple-system, "Segoe UI", Inter, sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 40px 16px 80px; }
+  h1 { font-size: 30px; line-height:1.2; margin: 0 0 8px; }
+  h2 { font-size: 21px; margin: 44px 0 12px; }
+  h3 { font-size: 17px; margin: 0 0 6px; }
+  p { margin: 0 0 12px; }
+  .sub { color: var(--muted); }
+  .lead { background: var(--panel); border:1px solid var(--line); border-left:4px solid var(--accent); border-radius:10px; padding:16px 18px; margin:20px 0; }
+  .tiles { display:grid; grid-template-columns: repeat(auto-fit, minmax(170px,1fr)); gap:12px; margin: 20px 0; }
+  .tile { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px 16px; }
+  .tile b { display:block; font-size:26px; font-variant-numeric: tabular-nums; }
+  .tile span { color:var(--muted); font-size:13px; }
+  .scroll { overflow-x:auto; }
+  table { border-collapse: collapse; width:100%; font-size:14.5px; font-variant-numeric: tabular-nums; background:var(--panel); border:1px solid var(--line); border-radius:10px; }
+  th, td { padding: 9px 12px; text-align:right; border-bottom:1px solid var(--line); white-space:nowrap; }
+  th:first-child, td:first-child { text-align:left; }
+  th { font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); }
+  tr:last-child td { border-bottom:0; }
+  tr.top td:first-child { font-weight:600; }
+  tr.cur td { color: var(--accent); font-weight:600; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:18px 20px; margin:14px 0; }
+  .card ul { margin: 8px 0 0; padding-left: 20px; }
+  .card li { margin: 4px 0; }
+  .tag { display:inline-block; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.05em; padding:2px 8px; border-radius:99px; background:color-mix(in srgb, var(--accent) 15%, transparent); color:var(--accent); margin-left:8px; vertical-align:middle; }
+  .bars { margin: 6px 0 0; }
+  .bar { display:grid; grid-template-columns: 190px 1fr 48px; gap:10px; align-items:center; font-size:14px; margin:6px 0; font-variant-numeric: tabular-nums; }
+  .bar i { display:block; height:14px; border-radius:4px; background:var(--bar); }
+  .bar.cur i { background:var(--barcur); }
+  .bar.cur span:first-child { color:var(--accent); font-weight:600; }
+  .note { font-size:13.5px; color:var(--muted); }
+  .good { color:var(--good); } .warn { color:var(--warn); }
+  code { font-size: 13px; background: color-mix(in srgb, var(--muted) 15%, transparent); padding: 1px 5px; border-radius: 4px; }
+  @media (max-width:560px) { .bar { grid-template-columns: 130px 1fr 44px; } h1 { font-size:25px; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Predicting a player's next-round score</h1>
+  <p class="sub">Research on refining the EuroGuru model · 10 November 2026</p>
+
+  <div class="lead">
+    I tested 19 models plus blends. The best three beat the current EuroGuru model on prediction error in every season tested, by about 2–4%. A larger gain isn't available: a player's score swings by about 8.5 FPT from game to game and the best model's error is 7.0, so most of what remains is luck.
+  </div>
+
+  <div class="tiles">
+    <div class="tile"><b>22,524</b><span>player-games used, across three seasons</span></div>
+    <div class="tile"><b>19</b><span>models tested, plus 4 blends</span></div>
+    <div class="tile"><b>2–4%</b><span>lower error than the current model</span></div>
+    <div class="tile"><b>+9.4 FPT</b><span>a round for the best squads, 2025-26</span></div>
+  </div>
+
+  <h2>How it was tested</h2>
+  <div class="card">
+    <ul style="margin-top:0">
+      <li><b>Data:</b> every regular-season game of 2024-25 and 2025-26, plus this season's 10 rounds. 2023-24 has no game rows in the bucket, so it couldn't be used.</li>
+      <li><b>Scores:</b> official FPT this season. For the older seasons FPT was rebuilt as PIR plus 10% for winners, which matches the official number on 99.5% of this season's rows.</li>
+      <li><b>Target:</b> what he scores in his club's next game, counting 0 if he doesn't play.</li>
+      <li><b>Method:</b> each round is predicted using only earlier games, from round 4 on.</li>
+      <li><b>Who is scored:</b> players who played at least one of their club's last 10 games.</li>
+      <li><b>Squad test:</b> the best 10 players for 97 CR (105 less a typical coach), captain ×2 and bench ×0.5, scored on what actually happened. It leaves the coach out, which is why the current model shows about 126 here rather than the 134 of the original backtest.</li>
+    </ul>
+  </div>
+
+  <h2>Prediction error</h2>
+  <p class="sub">RMSE in FPT, lower is better. 2025-26 covers 35 rounds, 2026-27 covers 7, 2024-25 covers 31.</p>
+  <div class="scroll">
+  <table>
+    <tr><th>Model</th><th>2025-26</th><th>2026-27</th><th>2024-25</th></tr>
+    <tr class="top"><td>1. Blend of 8 models</td><td>6.99</td><td>7.25</td><td>6.87</td></tr>
+    <tr class="top"><td>2. Two-stage trees</td><td>7.04</td><td>7.22</td><td>6.89</td></tr>
+    <tr class="top"><td>3. Two-stage linear</td><td>7.04</td><td>7.32</td><td>6.90</td></tr>
+    <tr><td>Recurrent network (GRU)</td><td>7.05</td><td>7.27</td><td>6.87</td></tr>
+    <tr><td>Minutes × points per minute</td><td>7.04</td><td>7.26</td><td>6.89</td></tr>
+    <tr><td>Random forest</td><td>7.02</td><td>7.29</td><td>6.90</td></tr>
+    <tr><td>Kalman skill tracker</td><td>7.07</td><td>7.35</td><td>6.96</td></tr>
+    <tr><td>Ridge regression</td><td>7.09</td><td>7.37</td><td>6.94</td></tr>
+    <tr><td>Neural network (MLP)</td><td>7.14</td><td>7.27</td><td>6.89</td></tr>
+    <tr class="cur"><td>Current EuroGuru model</td><td>7.20</td><td>7.39</td><td>7.13</td></tr>
+    <tr><td>Availability × season average</td><td>7.26</td><td>7.74</td><td>7.11</td></tr>
+    <tr><td>Season average</td><td>7.65</td><td>7.99</td><td>7.52</td></tr>
+    <tr><td>Your formula (default settings)</td><td>7.72</td><td>7.96</td><td>7.59</td></tr>
+    <tr><td>Last 5 games average</td><td>7.91</td><td>8.06</td><td>7.77</td></tr>
+  </table>
+  </div>
+  <p class="note" style="margin-top:10px">The blend's gain over the current model is outside the noise in all three seasons (90% intervals: +0.15 to +0.25, +0.08 to +0.20, +0.22 to +0.31).</p>
+
+  <h2>Squad test</h2>
+  <p class="sub">Average FPT a round scored by each model's best 97 CR squad. 2024-25 has no prices, so no squad test.</p>
+  <div class="card">
+    <h3>2025-26 · 35 rounds</h3>
+    <div class="bars">
+      <div class="bar"><span>Blend of 8 models</span><i style="width:100%"></i><span>135.7</span></div>
+      <div class="bar"><span>Two-stage linear</span><i style="width:97.3%"></i><span>132.1</span></div>
+      <div class="bar"><span>Two-stage trees</span><i style="width:94.3%"></i><span>127.9</span></div>
+      <div class="bar cur"><span>Current EuroGuru model</span><i style="width:93.1%"></i><span>126.4</span></div>
+      <div class="bar"><span>Your formula</span><i style="width:87%"></i><span>118.0</span></div>
+      <div class="bar"><span>Season average</span><i style="width:81.8%"></i><span>111.1</span></div>
+    </div>
+    <p class="note" style="margin:12px 0 0">The blend's +9.4 a round is a real gain (90% interval +2.9 to +15.7). The other two leads are within the noise.</p>
+  </div>
+  <div class="card">
+    <h3>2026-27 · 7 rounds</h3>
+    <div class="bars">
+      <div class="bar cur"><span>Current EuroGuru model</span><i style="width:91%"></i><span>123.5</span></div>
+      <div class="bar"><span>Two-stage linear</span><i style="width:88.6%"></i><span>120.2</span></div>
+      <div class="bar"><span>Blend of 8 models</span><i style="width:87.1%"></i><span>118.2</span></div>
+      <div class="bar"><span>Two-stage trees</span><i style="width:84.7%"></i><span>114.9</span></div>
+      <div class="bar"><span>Your formula</span><i style="width:74.6%"></i><span>101.3</span></div>
+      <div class="bar"><span>Season average</span><i style="width:72.4%"></i><span>98.3</span></div>
+    </div>
+    <p class="note" style="margin:12px 0 0"><span class="warn">Undecided.</span> The new models' squads scored 3–9 below the current model's, but with 7 rounds the uncertainty is about ±15 a round.</p>
+  </div>
+
+  <h2>The three best models</h2>
+
+  <div class="card">
+    <h3>1. Blend of 8 models <span class="tag">Most accurate</span></h3>
+    <ul>
+      <li>Averages the predictions of eight models: ridge regression, the two-stage linear and tree models, minutes × points per minute, plain boosted trees, random forest and two neural networks.</li>
+      <li>Each model makes different mistakes, and averaging cancels some of them out.</li>
+      <li>Best or near-best in every season, and the only model whose squad gain is outside the noise.</li>
+      <li>More honest projections: its squads came in about 6 under projection in 2025-26, against about 12 for the current model.</li>
+      <li class="warn">Needs LightGBM and PyTorch in the backend to ship.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h3>2. Two-stage trees <span class="tag">Best single model</span></h3>
+    <ul>
+      <li>Answers two questions with gradient-boosted trees (LightGBM), then multiplies them: the chance he plays, and what he scores if he does.</li>
+      <li><b>Chance he plays</b> is driven mostly by whether he played the last game (42% of the signal) and his current streak (20%).</li>
+      <li><b>Score if he plays</b> is driven mostly by his season average (31%), then recent form, his median over the last 10 games, his club's win chance (winners get +10%), price and minutes.</li>
+      <li class="warn">Over-rates its top picks, so its squads were no better than the current model's.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h3>3. Two-stage linear <span class="tag">Easiest to ship</span></h3>
+    <ul>
+      <li>The same two questions, answered with a logistic regression for the chance he plays and a ridge regression for the score.</li>
+      <li>It is two weighted formulas, so it could run in the backend with numpy alone.</li>
+      <li>Error matches the trees in two of three seasons. Its squads beat the current model's by 5.7 a round in 2025-26, though that is within the noise.</li>
+    </ul>
+  </div>
+
+  <h2>What to keep in mind</h2>
+  <div class="card">
+    <ul style="margin-top:0">
+      <li><b>The current model is already good.</b> It beats season average, Your formula and last-5 by a wide margin; the new models improve on it only modestly.</li>
+      <li><b>This season's squad result is open.</b> The accuracy gain held up in 2026-27, the squad gain did not, and 7 rounds can't settle it.</li>
+      <li><b>Things that didn't help:</b> teammate-absence features, the Kalman skill tracker, robust loss functions, and recalibrating the current model.</li>
+      <li><b>Not testable:</b> injuries. The bucket holds only today's injury list, so no model could learn from past ones.</li>
+      <li><b>Nothing in the app has changed.</b> If one is shipped, the two-stage linear model is the natural first step: most of the gain, no new dependencies.</li>
+    </ul>
+  </div>
+
+  <p class="note">Code and full leaderboards: <code>research/expected_model/</code> (<code>build_dataset.py</code>, <code>evaluate.py</code>, <code>report.py</code>, <code>data/leaderboard_*.csv</code>).</p>
+</main>
+</body>
+</html>
