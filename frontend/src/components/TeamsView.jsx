@@ -151,7 +151,7 @@ function Stat({ label, children, tone = '' }) {
     return (
         <div className="min-w-0">
             <div className="text-[11px] uppercase tracking-wider text-gray-500 font-semibold">{label}</div>
-            <div className={`mt-0.5 text-2xl font-bold tabular-nums ${tone}`}>{children}</div>
+            <div className={`mt-0.5 text-xl sm:text-2xl font-bold tabular-nums whitespace-nowrap ${tone}`}>{children}</div>
         </div>
     );
 }

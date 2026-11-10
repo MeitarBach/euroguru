@@ -25,6 +25,16 @@ const ROW_INDEX = { C: 0, F: 1, G: 2 };
 // A figure's width, in % of the floor's: a row of 4-5 is narrower.
 const FIGURE_CQW = 21.7;
 const FIGURE_CQW_CROWDED = 18.5;
+// Below this floor width (a phone) the figures are sized for the hand, not for the card:
+// wider, in rows spread further apart, and the floor grows deeper to hold them.
+const NARROW_PX = 560;
+const FIGURE_CQW_NARROW = { 1: 34, 2: 34, 3: 30 };
+const FIGURE_CQW_NARROW_CROWDED = 19.5;
+// The smallest phones (a floor under this): a size smaller type still, so a full surname fits.
+const TINY_PX = 330;
+// The bench is one row of six from this floor width up, else two rows of three. By the
+// floor, not the screen: a tablet with the sidebar has a phone-wide floor on a wide screen.
+const BENCH_ROW_PX = 600;
 // How far the captain's crown rises above a figure, as a share of the figure's width.
 const CROWN_LIFT = 0.075;
 const LABEL_PX = 26; // the "Starting five" line above the centers
@@ -34,6 +44,14 @@ const SPREAD = {
     1: [0], 2: [-0.175, 0.175], 3: [-0.303, 0, 0.303],
     4: [-0.375, -0.125, 0.125, 0.375], 5: [-0.4, -0.2, 0, 0.2, 0.4],
 };
+const SPREAD_NARROW = { ...SPREAD, 2: [-0.21, 0.21], 3: [-0.32, 0, 0.32] };
+
+/** A row of `n` starters: each figure's width (% of the floor) and where each stands. */
+function rowShape(n, narrow) {
+    const spread = (narrow ? SPREAD_NARROW : SPREAD)[n] ?? SPREAD[5];
+    if (narrow) return { width: n >= 4 ? FIGURE_CQW_NARROW_CROWDED : FIGURE_CQW_NARROW[n], spread };
+    return { width: n >= 4 ? FIGURE_CQW_CROWDED : FIGURE_CQW, spread };
+}
 const BUBBLE_MS = 4000;
 // How far a press must travel before it is a drag rather than a tap.
 const DRAG_START_PX = 6;
@@ -50,10 +68,10 @@ const initials = (name) => String(name ?? '?').replace(/\s*\([^)]*\)$/, '').spli
  * it; the floor keeps the card's proportions when that fits and grows deeper when it
  * does not (a phone, where the plates keep a readable size).
  */
-function courtLayout(width, figure) {
+function courtLayout(width, figure, figurePct = FIGURE_CQW) {
     const flat = width * H / W;
     if (!width || !figure) return { height: flat, top: (pos) => `${ROW_TOP[pos] * 100}%` };
-    const lift = CROWN_LIFT * (FIGURE_CQW / 100) * width;
+    const lift = CROWN_LIFT * (figurePct / 100) * width;
     const first = LABEL_PX + lift + GAP_PX;
     const pitch = figure + lift + GAP_PX;
     const need = first + 2 * pitch + figure + BOTTOM_PX;
@@ -63,8 +81,11 @@ function courtLayout(width, figure) {
     return { height, top: (pos) => `${first + spare * 0.2 + ROW_INDEX[pos] * (pitch + spare * 0.3)}px` };
 }
 
-/** The lines, `depth` floor-px deep: past 14 m that is the half-way line and its circle. */
-function CourtLines({ depth = H }) {
+/**
+ * The lines, `depth` floor-px deep: past 14 m that is the half-way line and its circle -
+ * left out with `halfway={false}` (a phone's deep floor, where it would cut through a row).
+ */
+function CourtLines({ depth = H, halfway = true }) {
     const bx = W / 2;
     const by = 1.575 * S;
     const r3 = 6.75 * S;
@@ -80,7 +101,7 @@ function CourtLines({ depth = H }) {
             <line x1={bx - 0.9 * S} y1={1.2 * S} x2={bx + 0.9 * S} y2={1.2 * S} stroke="rgba(255,255,255,0.55)" strokeWidth={4} />
             <circle cx={bx} cy={by} r={0.23 * S} fill="none" stroke="#fb923c" strokeWidth={3.5} />
             <path d={`M ${c3} 0 L ${c3} ${y3} A ${r3} ${r3} 0 0 0 ${W - c3} ${y3} L ${W - c3} 0`} {...line} />
-            {depth > 14 * S && (
+            {halfway && depth > 14 * S && (
                 <>
                     <line x1={0} y1={14 * S} x2={W} y2={14 * S} {...line} />
                     <path d={`M ${bx - 1.8 * S} ${14 * S} A ${1.8 * S} ${1.8 * S} 0 0 1 ${bx + 1.8 * S} ${14 * S}`} {...line} />
@@ -313,8 +334,12 @@ function DragGhost({ drag }) {
  * captain wears a gold crown. With `onCaptain` / `onRemove` (an editable team) every
  * starter has a crown to tap for the armband and an x in the corner.
  */
-function Starter({ row, photo, left, top, width, now, lastEvent, onTap, onCaptain, onRemove, expected, past, dragProps, dragging, dropOver }) {
+function Starter({ row, photo, left, top, width, narrow, tiny, now, lastEvent, onTap, onCaptain, onRemove, expected, past, dragProps, dragging, dropOver }) {
     const size = `${width}cqw`;
+    // On a phone the plate's type is set in px: the floor is too small for cqw to read.
+    const type = narrow
+        ? { name: `${(width < 32 ? 11.5 : 12.5) - (tiny ? 1 : 0)}px`, badge: '9px', line: '11px', small: '10px' }
+        : { name: 'max(12px, 2cqw)', badge: 'max(9px, 1.1cqw)', line: 'max(10px, 1.4cqw)', small: 'max(9px, 1.2cqw)' };
     return (
         <div
             data-drop-key={row.key}
@@ -334,16 +359,16 @@ function Starter({ row, photo, left, top, width, now, lastEvent, onTap, onCaptai
                     <Bubble event={lastEvent} factor={row.factor} now={now} />
                 </div>
                 <div
-                    className={`relative -mt-1 px-1.5 py-1 rounded-xl bg-[#0a0812]/90 border shadow-[0_8px_24px_rgba(0,0,0,0.45)] transition-colors
+                    className={`relative -mt-1 ${narrow ? 'px-1' : 'px-1.5'} py-1 rounded-xl bg-[#0a0812]/90 border shadow-[0_8px_24px_rgba(0,0,0,0.45)] transition-colors
                         ${row.captain ? 'border-yellow-400/75 shadow-[0_0_0_1px_rgba(250,204,21,0.25),0_8px_28px_rgba(250,204,21,0.18)]' : 'border-violet-400/40 group-hover:border-violet-300/70'}`}
                 >
-                    <div className="font-extrabold text-white truncate" style={{ fontSize: 'max(12px, 2cqw)' }}>
-                        <span className="inline-block mr-1 px-1 rounded bg-violet-500/25 text-violet-300 font-extrabold align-middle" style={{ fontSize: 'max(9px, 1.1cqw)' }}>
+                    <div className="font-extrabold text-white truncate" style={{ fontSize: type.name }}>
+                        <span className={`inline-block ${narrow ? 'mr-0.5 px-0.5' : 'mr-1 px-1'} rounded bg-violet-500/25 text-violet-300 font-extrabold align-middle`} style={{ fontSize: type.badge }}>
                             {row.player.position || '?'}
                         </span>
                         {surname(row.player.PlayerName)}
                     </div>
-                    <div className="flex items-center justify-center gap-1 text-gray-400 whitespace-nowrap" style={{ fontSize: 'max(10px, 1.4cqw)' }}>
+                    <div className="flex items-center justify-center gap-1 text-gray-400 whitespace-nowrap" style={{ fontSize: type.line }}>
                         {row.state === 'live' && <LiveDot />}
                         {row.counted === null ? (
                             <span className="truncate"><GameNote row={row} now={now} /></span>
@@ -357,16 +382,16 @@ function Starter({ row, photo, left, top, width, now, lastEvent, onTap, onCaptai
                         )}
                     </div>
                     {past
-                        ? <DeltaLine delta={row.delta} style={{ fontSize: 'max(9px, 1.2cqw)' }} />
-                        : expected && <PriceLine row={row} style={{ fontSize: 'max(9px, 1.2cqw)' }} />}
+                        ? <DeltaLine delta={row.delta} style={{ fontSize: type.small }} />
+                        : expected && <PriceLine row={row} style={{ fontSize: type.small }} />}
                 </div>
             </button>
             <CaptainCrown captain={row.captain} onClick={onCaptain} />
             {onRemove && (
                 <RemoveButton
                     onClick={onRemove}
-                    className="right-[10%]"
-                    style={{ top: 'calc(var(--fig) * 0.03)', width: 'max(20px, 2.8cqw)', height: 'max(20px, 2.8cqw)' }}
+                    className={narrow ? 'right-[4%]' : 'right-[10%]'}
+                    style={{ top: 'calc(var(--fig) * 0.03)', width: narrow ? '24px' : 'max(20px, 2.8cqw)', height: narrow ? '24px' : 'max(20px, 2.8cqw)' }}
                 />
             )}
         </div>
@@ -377,13 +402,13 @@ function Starter({ row, photo, left, top, width, now, lastEvent, onTap, onCaptai
  * A tile under the court - the sixth man, a bench player, the coach or an empty spot -
  * all one size, so the row reads as a row whatever is in it.
  */
-function Tile({ children, tone = '', onClick, dashed }) {
+function Tile({ children, tone = '', onClick, dashed, compact }) {
     return (
         <button
             type="button"
             onClick={onClick}
             disabled={!onClick}
-            className={`relative h-[168px] w-full overflow-hidden rounded-2xl text-center px-1.5 pb-2 border transition-colors flex flex-col items-center
+            className={`relative ${compact ? 'h-[180px]' : 'h-[168px]'} w-full overflow-hidden rounded-2xl text-center px-1.5 pb-2 border transition-colors flex flex-col items-center
                 ${dashed ? 'justify-center border-dashed border-white/15 text-gray-500 hover:text-white hover:border-violet-400/50'
                     : `bg-white/[0.045] border-white/[0.08] ${onClick ? 'hover:border-violet-400/40' : ''} ${tone}`}`}
         >
@@ -394,6 +419,24 @@ function Tile({ children, tone = '', onClick, dashed }) {
 
 /** The photo area every tile shares: the same height whether it holds a face or a crest. */
 const TILE_PHOTO = 'relative w-full h-[84px] shrink-0';
+
+/**
+ * A tile's name with its position: the badge inline beside the name, or - with `corner`,
+ * in a bench of three across, where a tile is narrow - in the tile's top-left corner, so
+ * the name has the whole width.
+ */
+function TileName({ pos, name, corner }) {
+    const badge = 'px-1 rounded bg-violet-500/25 text-violet-300 text-[9px] font-extrabold';
+    return (
+        <>
+            {corner && <span className={`absolute top-1.5 left-1.5 z-10 py-0.5 ${badge}`}>{pos}</span>}
+            <div className="mt-0.5 w-full shrink-0 text-[13px] font-extrabold text-white truncate">
+                {!corner && <span className={`mr-1 align-middle ${badge}`}>{pos}</span>}
+                {name}
+            </div>
+        </>
+    );
+}
 
 /**
  * A fantasy team on a half court, like the social skill's team card: the starting five
@@ -452,7 +495,9 @@ export default function TeamCourt({
         observer.observe(el);
         return () => observer.disconnect();
     }, [measure]);
-    const layout = courtLayout(box.width, box.figure);
+    const narrow = box.width > 0 && box.width < NARROW_PX;
+    const tiny = box.width > 0 && box.width < TINY_PX;
+    const sixUp = box.width >= BENCH_ROW_PX;
     const overKey = drag?.over?.key ?? null;
     const overZone = drag?.over?.zone ?? null;
     // Expected points read best at one decimal; live points keep the feed's own.
@@ -465,12 +510,15 @@ export default function TeamCourt({
     // Rows by position, the best of three in the middle as on the card.
     const rows = { C: [], F: [], G: [] };
     for (const r of starters) (rows[r.player.position] ?? rows.F).push(r);
+    const shapes = Object.fromEntries(Object.entries(rows).map(([pos, list]) => [pos, rowShape(list.length, narrow)]));
+    const widest = Math.max(FIGURE_CQW, ...Object.keys(rows).filter(p => rows[p].length).map(p => shapes[p].width));
+    const layout = courtLayout(box.width, box.figure, widest);
     const placed = [];
     for (const [pos, list] of Object.entries(rows)) {
         const sorted = [...list].sort((a, b) => (b.countedAvg ?? 0) - (a.countedAvg ?? 0));
         const ordered = sorted.length === 3 ? [sorted[1], sorted[0], sorted[2]] : sorted;
-        const xs = SPREAD[ordered.length] ?? SPREAD[5];
-        ordered.forEach((r, i) => placed.push({ row: r, left: 0.5 + xs[i], top: layout.top(pos), width: ordered.length >= 4 ? FIGURE_CQW_CROWDED : FIGURE_CQW }));
+        const { width, spread } = shapes[pos];
+        ordered.forEach((r, i) => placed.push({ row: r, left: 0.5 + spread[i], top: layout.top(pos), width }));
     }
     const formation = ['G', 'F', 'C'].map(p => rows[p].length).join('-');
 
@@ -493,7 +541,7 @@ export default function TeamCourt({
                     background: 'radial-gradient(ellipse at 50% 0%, rgba(139,92,246,0.28), rgba(139,92,246,0) 60%), linear-gradient(180deg, #15102a 0%, #0c0a16 100%)',
                 }}
             >
-                <CourtLines depth={box.width ? (W * layout.height) / box.width : H} />
+                <CourtLines depth={box.width ? (W * layout.height) / box.width : H} halfway={!narrow} />
                 <div className="absolute top-[2.4%] left-[2%] font-extrabold uppercase tracking-[0.15em] text-violet-300" style={{ fontSize: 'max(10px, 1.3cqw)' }}>
                     Starting five{starters.length ? <> · <b className="text-white">{formation}</b></> : null}
                     <span className="ml-2 normal-case tracking-normal font-mono text-white">
@@ -508,6 +556,8 @@ export default function TeamCourt({
                         left={left}
                         top={top}
                         width={width}
+                        narrow={narrow}
+                        tiny={tiny}
                         now={now}
                         lastEvent={lastEvent?.get(row.key)}
                         expected={expected}
@@ -534,7 +584,7 @@ export default function TeamCourt({
 
             <div
                 data-drop-zone="bench"
-                className={`grid grid-cols-3 sm:grid-cols-6 gap-2 rounded-2xl transition-shadow ${overZone === 'bench' ? 'ring-2 ring-emerald-400/60 ring-offset-4 ring-offset-[#050507]' : ''}`}
+                className={`grid ${sixUp ? 'grid-cols-6' : 'grid-cols-3'} gap-2 rounded-2xl transition-shadow ${overZone === 'bench' ? 'ring-2 ring-emerald-400/60 ring-offset-4 ring-offset-[#050507]' : ''}`}
             >
                 {bench.map(row => (
                     <div
@@ -543,15 +593,12 @@ export default function TeamCourt({
                         className={`relative rounded-2xl transition-opacity ${drag?.key === row.key ? 'opacity-35' : ''} ${overKey === row.key && drag?.key !== row.key ? 'ring-2 ring-emerald-400/80' : ''}`}
                         {...handlers(row, photos[row.key])}
                     >
-                        <Tile onClick={() => tap(row)} tone={row.sixth ? '!border-emerald-400/45' : ''}>
+                        <Tile compact={!sixUp} onClick={() => tap(row)} tone={row.sixth ? '!border-emerald-400/45' : ''}>
                             <div className={TILE_PHOTO}>
                                 <Bust url={photoUrl(photos[row.key], 140)} name={row.player.PlayerName} size="128px" />
                                 <Bubble event={lastEvent?.get(row.key)} factor={row.factor} now={now} />
                             </div>
-                            <div className="mt-0.5 w-full text-[13px] font-extrabold text-white truncate">
-                                <span className="mr-1 px-1 rounded bg-violet-500/25 text-violet-300 text-[9px] align-middle">{row.player.position || '?'}</span>
-                                {surname(row.player.PlayerName)}
-                            </div>
+                            <TileName corner={!sixUp} pos={row.player.position || '?'} name={surname(row.player.PlayerName)} />
                             <div className="w-full flex items-center justify-center gap-1 text-[11px] text-gray-400 whitespace-nowrap">
                                 {row.state === 'live' && <LiveDot />}
                                 {row.counted === null
@@ -565,7 +612,7 @@ export default function TeamCourt({
                             {past
                                 ? <DeltaLine delta={row.delta} className="text-[10px]" />
                                 : expected && <PriceLine row={row} className="text-[10px]" />}
-                            <div className={`mt-auto inline-block whitespace-nowrap text-[9px] font-extrabold tracking-normal sm:tracking-wider uppercase px-1.5 py-0.5 rounded
+                            <div className={`mt-auto inline-block whitespace-nowrap text-[9px] font-extrabold ${sixUp ? 'tracking-wider' : 'tracking-normal'} uppercase px-1.5 py-0.5 rounded
                                 ${row.sixth ? 'bg-emerald-500/15 text-emerald-300' : 'bg-white/[0.06] text-gray-400'}`}>
                                 {row.sixth ? '6th man · 100%' : 'Bench · 50%'}
                             </div>
@@ -576,13 +623,13 @@ export default function TeamCourt({
                     </div>
                 ))}
                 {Array.from({ length: emptyBench }, (_, i) => (
-                    <Tile key={`empty-${i}`} dashed onClick={() => onAddPlayers?.('bench')}>
+                    <Tile key={`empty-${i}`} compact={!sixUp} dashed onClick={() => onAddPlayers?.('bench')}>
                         <Plus size={16} />
                         <span className="mt-1 text-[11px]">{bench.length === 0 && i === 0 ? '6th man · 100%' : 'Bench · 50%'}</span>
                     </Tile>
                 ))}
                 {coach ? (
-                    <Tile tone="!border-violet-500/30" onClick={editable ? onPickCoach : undefined}>
+                    <Tile compact={!sixUp} tone="!border-violet-500/30" onClick={editable ? onPickCoach : undefined}>
                         <div className={`${TILE_PHOTO} flex items-center justify-center`}>
                             <div className="absolute w-[88px] h-[88px] rounded-full" style={{ background: 'radial-gradient(circle, rgba(139,92,246,0.5), rgba(139,92,246,0) 70%)' }} />
                             {crests[coach.code] ? (
@@ -594,16 +641,15 @@ export default function TeamCourt({
                                 <span className="relative text-lg font-extrabold text-violet-200">{initials(coach.player.PlayerName)}</span>
                             )}
                         </div>
-                        <div className="mt-0.5 w-full text-[13px] font-extrabold text-white truncate">
-                            <span className="mr-1 px-1 rounded bg-violet-500/25 text-violet-300 text-[9px] align-middle">HC</span>
-                            {surname(coach.player.PlayerName)}
-                        </div>
-                        <div className="w-full flex items-center justify-center gap-1 text-[11px] text-gray-400 whitespace-nowrap">
+                        <TileName corner={!sixUp} pos="HC" name={surname(coach.player.PlayerName)} />
+                        {/* The note ("vs BAS · 30%", "lost by 4"): under the points in a bench of three (a taller
+                            tile), cut short beside them in a row of six. */}
+                        <div className={`w-full shrink-0 flex ${sixUp ? '' : 'flex-wrap'} items-center justify-center gap-x-1 text-[11px] text-gray-400`}>
                             {coach.state === 'live' && <LiveDot />}
                             {coach.counted === null
                                 ? <span className="truncate"><GameNote row={coach} now={now} /></span>
-                                : <><span className="font-mono font-bold text-white">{coach.counted > 0 ? '+' : ''}{fmt(coach.counted)}</span>
-                                    <span className="truncate">{coach.note ?? (coach.margin !== null && coach.margin !== undefined ? marginText(coach.margin, coach.state === 'final') : '')}</span></>}
+                                : <><span className="font-mono font-bold text-white whitespace-nowrap">{coach.counted > 0 ? '+' : ''}{fmt(coach.counted)}</span>
+                                    <span className="max-w-full truncate">{coach.note ?? (coach.margin !== null && coach.margin !== undefined ? marginText(coach.margin, coach.state === 'final') : '')}</span></>}
                         </div>
                         {expected && !past && <PriceLine row={coach} className="text-[10px]" />}
                         <div className="mt-auto inline-block text-[9px] font-extrabold tracking-wider uppercase px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-200">
@@ -611,7 +657,7 @@ export default function TeamCourt({
                         </div>
                     </Tile>
                 ) : editable ? (
-                    <Tile dashed onClick={onPickCoach}>
+                    <Tile compact={!sixUp} dashed onClick={onPickCoach}>
                         <Plus size={16} />
                         <span className="mt-1 text-[11px]">Coach</span>
                     </Tile>

@@ -111,9 +111,10 @@ export default function PlayerPool({
                             )}
                         </div>
                     </div>
-                    <div className={`${tall ? '' : 'max-h-[560px] overflow-y-auto'} -mx-1 px-1 space-y-0.5`}>
-                        <div className="grid grid-cols-[1fr_3.5rem_3.5rem_3rem] gap-2 px-2.5 pb-1 text-[10px] uppercase tracking-wider text-gray-600">
-                            <span>Player</span><span className="text-right">Exp</span><span className="text-right">Avg</span><span className="text-right">CR</span>
+                    {/* On a phone the list flows with the page rather than scrolling in a box of its own. */}
+                    <div className={`${tall ? '' : 'sm:max-h-[560px] sm:overflow-y-auto'} -mx-1 px-1 space-y-0.5`}>
+                        <div className="grid grid-cols-[1fr_3rem_3rem] sm:grid-cols-[1fr_3.5rem_3.5rem_3rem] gap-2 px-2.5 pb-1 text-[10px] uppercase tracking-wider text-gray-600">
+                            <span>Player</span><span className="text-right">Exp</span><span className="hidden sm:block text-right">Avg</span><span className="text-right">CR</span>
                         </div>
                         {list.slice(0, shown).map(r => {
                             const selected = inTeam.has(r.key);
@@ -124,7 +125,7 @@ export default function PlayerPool({
                                     disabled={!editable}
                                     onClick={() => onTogglePlayer(r.key)}
                                     aria-pressed={selected}
-                                    className={`w-full grid grid-cols-[1fr_3.5rem_3.5rem_3rem] items-center gap-2 px-2.5 py-1.5 rounded-lg text-left text-sm border transition-colors
+                                    className={`w-full grid grid-cols-[1fr_3rem_3rem] sm:grid-cols-[1fr_3.5rem_3.5rem_3rem] items-center gap-2 px-2.5 py-1.5 rounded-lg text-left text-sm border transition-colors
                                         ${selected ? 'bg-purple-500/15 border-purple-500/40' : 'border-transparent enabled:hover:bg-white/[0.04]'}`}
                                 >
                                     <span className="min-w-0 flex items-center gap-2">
@@ -140,7 +141,8 @@ export default function PlayerPool({
                                         </span>
                                     </span>
                                     <span className="text-right font-mono text-white tabular-nums">{one(r.fpt)}</span>
-                                    <span className="text-right font-mono text-gray-400 tabular-nums">{one(r.avg)}</span>
+                                    {/* A phone shows Exp and CR only: the name needs the room. */}
+                                    <span className="hidden sm:block text-right font-mono text-gray-400 tabular-nums">{one(r.avg)}</span>
                                     <span className="text-right font-mono text-gray-400 tabular-nums">{one(r.cr)}</span>
                                 </button>
                             );
@@ -155,7 +157,7 @@ export default function PlayerPool({
                 </>
             ) : (
                 <div className="space-y-0.5">
-                    <div className="grid grid-cols-[1fr_4.5rem_3.5rem_3rem] gap-2 px-2.5 pb-1 text-[10px] uppercase tracking-wider text-gray-600">
+                    <div className="grid grid-cols-[1fr_4rem_3rem_2.5rem] sm:grid-cols-[1fr_4.5rem_3.5rem_3rem] gap-2 px-2.5 pb-1 text-[10px] uppercase tracking-wider text-gray-600">
                         <span>Coach</span><span>Next</span>
                         <span className="text-right" title="The score he most likely makes, and its chance">Likely</span>
                         <span className="text-right">CR</span>
@@ -169,7 +171,7 @@ export default function PlayerPool({
                                 disabled={!editable}
                                 onClick={() => onPickCoach(c.key)}
                                 aria-pressed={selected}
-                                className={`w-full grid grid-cols-[1fr_4.5rem_3.5rem_3rem] items-center gap-2 px-2.5 py-1.5 rounded-lg text-left text-sm border transition-colors
+                                className={`w-full grid grid-cols-[1fr_4rem_3rem_2.5rem] sm:grid-cols-[1fr_4.5rem_3.5rem_3rem] items-center gap-2 px-2.5 py-1.5 rounded-lg text-left text-sm border transition-colors
                                     ${selected ? 'bg-purple-500/15 border-purple-500/40' : 'border-transparent enabled:hover:bg-white/[0.04]'}`}
                             >
                                 <span className="min-w-0">

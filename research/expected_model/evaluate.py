@@ -113,7 +113,9 @@ def m_current(tr, te, F, shrink=6):
 
 
 def m_current_calibrated(tr, te, F):
-    slope, icept = np.polyfit(m_current(tr, tr, F), tr["y"], 1)
+    x = m_current(tr, tr, F)
+    ok = np.isfinite(x)
+    slope, icept = np.polyfit(x[ok], tr["y"].values[ok], 1)
     return icept + slope * m_current(tr, te, F)
 
 

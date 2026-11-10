@@ -23,8 +23,8 @@ export default function TeamPage({
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-5 items-start">
             <section className="xl:col-span-2 space-y-3">
                 <div className="glass-panel p-4 space-y-3">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div className="min-w-0">
+                    <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
                             <h3 className="flex items-center gap-2 text-lg font-semibold text-white">
                                 <Shirt size={18} className="text-purple-300 shrink-0" />
                                 <span className="truncate">{group.name}</span>
@@ -39,7 +39,7 @@ export default function TeamPage({
                                 </div>
                             )}
                         </div>
-                        <div className="text-right">
+                        <div className="text-right shrink-0">
                             <AnimatedNumber
                                 value={group.sums.total}
                                 decimals={decimalsFor(group.sums.total)}
