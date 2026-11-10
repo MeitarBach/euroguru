@@ -1,41 +1,63 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Radio, UserPlus, Volume2, VolumeX, FlaskConical, Plus, RefreshCw } from 'lucide-react';
-import { fetchStats, fetchCoaches } from '../services/api';
+import { Volume2, VolumeX, FlaskConical, RefreshCw } from 'lucide-react';
+import { fetchStats, fetchCoaches, fetchHeadshots } from '../services/api';
 import { CURRENT_SEASON } from '../seasons';
 import useWatchGroups, { GROUP_COLORS } from '../hooks/useWatchGroups';
+import useTeams from '../hooks/useTeams';
+import useRoundLock from '../hooks/useRoundLock';
+import useRooms from '../hooks/useRooms';
+import useRoomBoards from '../hooks/useRoomBoards';
+import usePlayedLineups from '../hooks/usePlayedLineups';
+import RoomView from './live/RoomView';
+import { useAuth } from '../hooks/authContext';
 import useLiveRound from '../hooks/useLiveRound';
 import useNow from '../hooks/useNow';
 import { useOpenPlayer } from '../hooks/playerDetailContext';
 import { euroleagueSource } from '../lib/live/source';
 import { demoSource } from '../lib/live/demo';
-import { watchRow, inGroup, sortRows, totals, coachRow, coachKey } from '../lib/live/rows';
-import { countdown, ago, decimalsFor } from '../lib/live/format';
-import { LayoutGroup } from 'framer-motion';
+import { watchRow, inGroup, sortRows, totals, coachRow, coachKey, boxscoreName } from '../lib/live/rows';
+import { boardTeams, standingOf } from '../lib/live/standings';
+import { countdown, ago } from '../lib/live/format';
 import { chime, enableChime } from '../lib/live/chime';
 import { euroleagueCode } from '../lib/live/teams';
+import { shareGroup, readInvite, clearInvite } from '../lib/live/share';
 import GameStrip from './live/GameStrip';
-import WatchCard from './live/WatchCard';
-import { GroupBoard, GroupHeader } from './live/GroupBoard';
+import { GroupBoard } from './live/GroupBoard';
 import ActivityFeed from './live/ActivityFeed';
 import LivePicker from './live/LivePicker';
 import GameSection from './live/GameSection';
-import CoachCard from './live/CoachCard';
-import CoachPicker from './live/CoachPicker';
-import { boxscoreName } from '../lib/live/rows';
-import { shareGroup, readInvite, clearInvite } from '../lib/live/share';
 import LiveDot from './live/LiveDot';
+import MyTeamsWidget from './live/hub/MyTeamsWidget';
+import RoomsWidget from './live/hub/RoomsWidget';
+import HubHeader from './live/hub/HubHeader';
+import TeamPage from './live/hub/TeamPage';
+import WatchlistPage from './live/hub/WatchlistPage';
+import BringDialog from './live/hub/BringDialog';
 
 const SEASON_CODE = `E${CURRENT_SEASON}`;
 // Every priced player, with season averages: the same request the stats table makes
 // for its widest view, so it is usually already cached.
 const ROSTER_QUERY = { season: CURRENT_SEASON, position: 'All', min_cr: 0, max_cr: 100, last_x_games: 100 };
 const SOUND_KEY = 'euroguru.liveSound';
+// How a team is drawn: on a half court with photos, or as the detailed stat cards.
+const VIEW_KEY = 'euroguru.liveTeamView';
+const loadView = () => {
+    try {
+        return window.localStorage.getItem(VIEW_KEY) === 'cards' ? 'cards' : 'court';
+    } catch {
+        return 'court';
+    }
+};
 const BIG_PLAY = 3;
 // Euroleague's edge holds an answer for up to a minute; much older than that while a
 // game is on means their feed has stalled, which is worth saying out loud.
 const STALE_FEED_MS = 150_000;
+// The hub's home; the other pages are { kind: 'team' | 'room' | 'list', id }.
+const HOME = { kind: 'home' };
 
-const fixedScore = (x) => x.toFixed(decimalsFor(x));
+const sameLineup = (a, b) => a.captain === b.captain && a.coach === b.coach
+    && a.keys.length === b.keys.length && a.keys.every(k => b.keys.includes(k))
+    && a.bench.length === b.bench.length && a.bench.every((k, i) => b.bench[i] === k);
 
 const loadSound = () => {
     try {
@@ -45,7 +67,7 @@ const loadSound = () => {
     }
 };
 
-function StatusPill({ games, now }) {
+function StatusPill({ games, nextRound, now }) {
     const live = games.filter(g => g.status === 'live');
     if (live.length) {
         return (
@@ -63,7 +85,12 @@ function StatusPill({ games, now }) {
         );
     }
     if (games.length) {
-        return <span className="px-2.5 py-1 rounded-full bg-white/5 text-xs text-gray-400">Round complete</span>;
+        return (
+            <span className="px-2.5 py-1 rounded-full bg-white/5 text-xs text-gray-400">
+                Round complete
+                {nextRound && nextRound.tipoff > now && <> · Round {nextRound.round} in {countdown(nextRound.tipoff - now)}</>}
+            </span>
+        );
     }
     return null;
 }
@@ -84,119 +111,34 @@ function Freshness({ connection, games, now }) {
     );
 }
 
-function EmptyState({ group, suggestions, onAdd, onPick }) {
-    return (
-        <div className="glass-panel p-6 sm:p-8 text-center">
-            <div className="mx-auto mb-3 w-12 h-12 rounded-full flex items-center justify-center bg-purple-500/15 border border-purple-500/30 text-purple-300">
-                <Radio size={22} />
-            </div>
-            <h3 className="text-lg font-semibold text-white">Who's in {group.name}?</h3>
-            <p className="mt-1 text-sm text-gray-400 max-w-md mx-auto">
-                Add the players on this roster. Their fantasy points update live while they play, and the
-                group's total moves with every basket, board and turnover. Make a group for each team in your league.
-            </p>
-            <button
-                type="button"
-                onClick={onPick}
-                className="mt-4 inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium text-white bg-gradient-to-r from-purple-600 to-purple-500 hover:from-purple-500 hover:to-purple-400"
-            >
-                <UserPlus size={16} /> Choose players
-            </button>
-            {suggestions.length > 0 && (
-                <div className="mt-6">
-                    <div className="text-[11px] uppercase tracking-wider text-gray-600 mb-2">Or start with the top scorers in this round</div>
-                    <div className="flex flex-wrap justify-center gap-2">
-                        {suggestions.map(p => (
-                            <button
-                                key={p.PlayerKey}
-                                type="button"
-                                onClick={() => onAdd(p.PlayerKey)}
-                                className="inline-flex items-center gap-1.5 pl-2 pr-2.5 py-1.5 rounded-full text-xs border border-white/10 bg-white/5 text-gray-200 hover:bg-purple-500/15 hover:border-purple-500/30"
-                            >
-                                <Plus size={12} /> {p.PlayerName}
-                                <span className="font-mono text-gray-500">{p.Average_Score.toFixed(1)}</span>
-                            </button>
-                        ))}
-                    </div>
-                </div>
-            )}
-        </div>
-    );
-}
-
 /**
- * The group's head coach: their card, or a way to pick one. A coach is worth their
- * club's margin, so they count from the first basket of their game.
- */
-function CoachSlot({ group, coaches, games, history, lastEvent, now, picking, onTogglePicker, onClosePicker, onPick }) {
-    const coach = group.coachRow;
-    if (!coach && !coaches.length) return null;
-    return (
-        <div className="relative space-y-2">
-            <div className="flex items-baseline justify-between px-1 text-[11px] uppercase tracking-wider text-gray-500 font-semibold">
-                <span>
-                    Coach
-                    <span className="normal-case tracking-normal font-normal text-gray-600"> · scores the club's margin</span>
-                </span>
-                <span className="flex items-baseline gap-3 normal-case tracking-normal">
-                    {coach && (
-                        <button type="button" onClick={onTogglePicker} className="font-normal text-purple-300 hover:text-purple-200">
-                            Change
-                        </button>
-                    )}
-                    {coach && <span className="font-mono text-gray-400">{fixedScore(coach.counted ?? 0)}</span>}
-                </span>
-            </div>
-            {coach ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-3 gap-2">
-                    <CoachCard
-                        row={coach}
-                        history={history[coach.key]}
-                        lastEvent={lastEvent.get(coach.key)}
-                        now={now}
-                        onRemove={() => onPick(coach.key)}
-                    />
-                </div>
-            ) : (
-                <button
-                    type="button"
-                    onClick={onTogglePicker}
-                    className="inline-flex items-center gap-2 px-3 py-2.5 rounded-xl border border-dashed border-white/10 text-sm text-gray-400 hover:text-white hover:border-purple-500/40"
-                >
-                    <Plus size={14} /> Add a coach
-                </button>
-            )}
-            {picking && (
-                <CoachPicker
-                    coaches={coaches}
-                    games={games}
-                    selectedKey={coach?.key ?? null}
-                    now={now}
-                    onPick={(key) => { onPick(key); onClosePicker(); }}
-                    onClose={onClosePicker}
-                />
-            )}
-        </div>
-    );
-}
-
-/**
- * Live fantasy points for the players you choose, while their games are on.
+ * Live: fantasy points as the games happen, organised as a hub. The home shows your
+ * teams, your Watch Rooms (and public ones to discover) and your watchlists as widgets,
+ * each live; a team, a room or a watchlist opens on a page of its own, with a switcher
+ * to jump between them. Bringing a team into a room is one dialog, reachable from the
+ * team, the room, or My Teams.
  *
  * The browser reads Euroleague's live feed directly (see lib/live/feed.js) and scores it
  * exactly as the fantasy game does. ?demo replays a finished round instead, for trying
  * the tab when nothing is on.
  */
-export default function LiveView() {
+export default function LiveView({ active = true, intent = null, onNavigate }) {
     const demo = useMemo(() => new URLSearchParams(window.location.search).has('demo'), []);
     const [source] = useState(() => (demo ? demoSource(SEASON_CODE) : euroleagueSource(SEASON_CODE)));
     const [roster, setRoster] = useState(null);
     const [coaches, setCoaches] = useState([]);
-    const [coachPicker, setCoachPicker] = useState(false);
+    const [headshots, setHeadshots] = useState({ players: {}, names: {}, crests: {} });
+    const [teamView, setTeamView] = useState(loadView);
+    const changeTeamView = (next) => {
+        setTeamView(next);
+        try {
+            window.localStorage.setItem(VIEW_KEY, next);
+        } catch { /* the choice just lasts this visit */ }
+    };
     const [picker, setPicker] = useState({ open: false, game: null });
     // The game open in the game view, by code - its boxscore is polled while it is.
     const [openGame, setOpenGame] = useState(null);
-    // A group someone shared with an invite link (?join=), offered until accepted or dismissed.
+    // A watchlist someone shared with an invite link (?join=), offered until accepted or dismissed.
     const [invite, setInvite] = useState(() => readInvite());
     const [toast, setToast] = useState(null);
     const flash = useCallback((message) => {
@@ -206,21 +148,108 @@ export default function LiveView() {
     }, []);
     const [sound, setSound] = useState(loadSound);
     const now = useNow(1000);
-    const watch = useWatchGroups();
+    const { user, loading: authLoading, openAuth } = useAuth();
+    const toMyTeams = () => onNavigate?.('teams');
+    const lock = useRoundLock(CURRENT_SEASON, now);
+    const lists = useWatchGroups();
+    const teams = useTeams({ lock, notify: flash });
+    const rooms = useRooms({ notify: flash });
+    const openRoom = rooms.open;
+
+    // Which page of the hub is on screen, the team picked in a room, and the bring
+    // dialog: { teamId } for one of your teams, { room } for a room.
+    const [page, setPage] = useState(HOME);
+    const [roomTeamId, setRoomTeamId] = useState(null);
+    const [bring, setBring] = useState(null);
+    const go = useCallback((next) => {
+        setPage(next);
+        setOpenGame(null);
+        setRoomTeamId(null);
+        openRoom(next.kind === 'room' ? next.id : null);
+        window.scrollTo?.({ top: 0, behavior: 'smooth' });
+    }, [openRoom]);
+    const goHome = useCallback(() => go(HOME), [go]);
+
+    // The open room went away under you (closed, or you lost access to it): home.
+    const [seenOpenId, setSeenOpenId] = useState(rooms.openId);
+    if (rooms.openId !== seenOpenId) {
+        setSeenOpenId(rooms.openId);
+        if (rooms.openId === null && page.kind === 'room') setPage(HOME);
+    }
+
+    // Another tab sent us here: "Bring to a Watch Room" from My Teams opens the bring
+    // dialog for that team on the home. Adjusted while rendering, once per request.
+    const [seenIntent, setSeenIntent] = useState(intent);
+    if (intent !== seenIntent) {
+        setSeenIntent(intent);
+        if (intent) {
+            setPage(HOME);
+            setOpenGame(null);
+            if (intent.bring) setBring({ teamId: intent.bring });
+        }
+    }
+
+    // Teams change in My Teams while this tab stays mounted: catch up on return.
+    const [boardsVersion, setBoardsVersion] = useState(0);
+    const refreshRooms = useCallback(() => setBoardsVersion(v => v + 1), []);
+    const wasActive = useRef(active);
+    useEffect(() => {
+        // (useRoomBoards reloads on its own when `active` comes back.)
+        if (active && !wasActive.current) { teams.reload(); rooms.reload(); rooms.refreshBoard(); }
+        wasActive.current = active;
+    }, [active]); // eslint-disable-line react-hooks/exhaustive-deps -- reloads are stable; only the switch matters
+
+    // An invite link opened signed out: ask to sign in, once.
+    const askedSignIn = useRef(false);
+    useEffect(() => {
+        if (rooms.inviteCode && !user && !authLoading && !askedSignIn.current) {
+            askedSignIn.current = true;
+            openAuth('Sign in to join this Watch Room');
+        }
+    }, [rooms.inviteCode, user, authLoading, openAuth]);
     const openPlayer = useOpenPlayer();
+    const openPlayerNow = useCallback((name) => openPlayer(name, CURRENT_SEASON), [openPlayer]);
 
     useEffect(() => {
         let alive = true;
         fetchStats(ROSTER_QUERY).then(rows => { if (alive) setRoster(rows ?? []); });
         fetchCoaches(CURRENT_SEASON).then(rows => { if (alive) setCoaches(Array.isArray(rows) ? rows : []); });
+        fetchHeadshots(CURRENT_SEASON).then(map => { if (alive && map?.players) setHeadshots(map); });
         return () => { alive = false; };
     }, []);
     const coachByKey = useMemo(() => new Map(coaches.map(c => [coachKey(c), c])), [coaches]);
-    // Every coach some group has, for the live loop to follow by score.
-    const watchCoaches = useMemo(() => [...new Set(watch.groups.map(g => g.coach).filter(Boolean))]
+
+    // Every room of yours, for the home's standings; and the open room (maybe a public
+    // one you are only looking into).
+    const myRoomIds = useMemo(() => rooms.rooms.map(r => r.id), [rooms.rooms]);
+    const boards = useRoomBoards(myRoomIds, { active, version: boardsVersion });
+    const boardRaw = useMemo(
+        () => Object.fromEntries(Object.entries(boards).map(([id, b]) => [id, boardTeams(b)])),
+        [boards],
+    );
+    const roomRaw = useMemo(() => boardTeams(rooms.board), [rooms.board]);
+
+    // Between rounds the page keeps the last round, while your teams are already open for
+    // the next: each is scored on the lineup it played that round with (as the rooms' boards
+    // are), flagged `edited` when it has changed since. The round comes from the live loop
+    // below, kept here so those lineups' players are in the loop's own list.
+    const [shownRound, setShownRound] = useState(null);
+    const played = usePlayedLineups(CURRENT_SEASON, shownRound, { userId: user?.id ?? null, enabled: lock.ready && !lock.locked });
+    const teamRaw = useMemo(() => teams.groups.map(g => {
+        const asPlayed = played[g.id];
+        return asPlayed ? { ...g, ...asPlayed, edited: !sameLineup(asPlayed, g) } : g;
+    }), [teams.groups, played]);
+
+    // Everyone in a team, a watchlist or a room, and every coach any of them has, for the live loop.
+    const allRaw = useMemo(
+        () => [...teamRaw, ...lists.groups, ...roomRaw, ...Object.values(boardRaw).flat()],
+        [teamRaw, lists.groups, roomRaw, boardRaw],
+    );
+    const followedKeys = useMemo(() => [...new Set(allRaw.flatMap(g => g.keys))], [allRaw]);
+    const watchCoaches = useMemo(() => [...new Set(allRaw.map(g => g.coach).filter(Boolean))]
         .map(key => coachByKey.get(key))
         .filter(Boolean)
-        .map(c => ({ key: coachKey(c), code: c.TeamCode, name: c.CoachName })), [watch.groups, coachByKey]);
+        .map(c => ({ key: coachKey(c), code: c.TeamCode, name: c.CoachName })), [allRaw, coachByKey]);
 
     // A big play chimes - when the viewer has turned sound on.
     const soundOn = useRef(sound);
@@ -253,25 +282,28 @@ export default function LiveView() {
         source,
         seasonCode: demo ? `${SEASON_CODE}-demo` : SEASON_CODE,
         roster,
-        watchKeys: watch.allKeys,
+        watchKeys: followedKeys,
         watchCoaches,
         onEvents,
         focusCode: openGame,
     });
+    if (live.round !== shownRound) setShownRound(live.round);
 
     const rosterByKey = useMemo(() => new Map((roster ?? []).map(p => [p.PlayerKey, p])), [roster]);
     // One row per followed player, shared by every group they are in.
     const rowByKey = useMemo(() => new Map(
-        watch.allKeys
+        followedKeys
             .map(k => rosterByKey.get(k))
             .filter(Boolean)
             .map(p => [p.PlayerKey, watchRow(p, live.games)]),
-    ), [watch.allKeys, rosterByKey, live.games]);
+    ), [followedKeys, rosterByKey, live.games]);
     // Each group counts its own players by their role in it - captain double, bench
     // half - with the captain pinned to the top of the starters.
-    const groups = useMemo(() => watch.groups.map(g => {
+    const scoreGroups = useCallback((list) => list.map(g => {
         const bench = new Set(g.bench);
-        const roleOf = (key) => (g.captain === key ? 'captain' : bench.has(key) ? 'bench' : 'starter');
+        // The first on the bench is the sixth man, who counts in full.
+        const roleOf = (key) => (g.captain === key ? 'captain'
+            : g.bench[0] === key ? 'sixth' : bench.has(key) ? 'bench' : 'starter');
         const sorted = sortRows(g.keys.map(k => rowByKey.get(k)).filter(Boolean).map(r => inGroup(r, roleOf(r.key))));
         const rows = [...sorted.filter(r => r.captain), ...sorted.filter(r => !r.captain)];
         const coach = coachByKey.get(g.coach);
@@ -279,11 +311,39 @@ export default function LiveView() {
         return {
             ...g, colorHex: GROUP_COLORS[g.color % GROUP_COLORS.length], rows, coachRow: coachLine, sums: totals(rows, coachLine),
         };
-    }), [watch.groups, rowByKey, coachByKey, live.games]);
-    const group = groups.find(g => g.id === watch.selected.id) ?? groups[0];
-    const groupsOf = useCallback((key) => groups.filter(g => g.keys.includes(key) || g.coach === key), [groups]);
-    // The open game, if any: the main column shows it in place of the group, and the
-    // feed beside it follows that game rather than your players.
+    }), [rowByKey, coachByKey, live.games]);
+    const teamGroups = useMemo(() => scoreGroups(teamRaw), [scoreGroups, teamRaw]);
+    const listGroups = useMemo(() => scoreGroups(lists.groups), [scoreGroups, lists.groups]);
+    const roomGroups = useMemo(() => scoreGroups(roomRaw), [scoreGroups, roomRaw]);
+    const standings = useMemo(
+        () => Object.fromEntries(Object.entries(boardRaw).map(([id, raw]) => [id, standingOf(scoreGroups(raw))])),
+        [boardRaw, scoreGroups],
+    );
+    // The rooms a team of yours plays in, with its place in each.
+    const roomsOf = useCallback((teamId) => rooms.rooms
+        .filter(r => (r.my_teams ?? []).includes(teamId))
+        .map(r => {
+            const s = standings[r.id];
+            return { id: r.id, name: r.name, place: s?.placeOf(teamId) ?? null, size: s?.size ?? r.teams, revealed: Boolean(s?.revealed) };
+        }), [rooms.rooms, standings]);
+
+    // What is on screen. A team or watchlist that is gone (deleted elsewhere) means home.
+    const team = page.kind === 'team' ? teamGroups.find(g => g.id === page.id) ?? null : null;
+    const list = page.kind === 'list' ? listGroups.find(g => g.id === page.id) ?? null : null;
+    const shown = (page.kind === 'team' && !team) || (page.kind === 'list' && !list) ? HOME : page;
+    const roomTeam = roomGroups.find(g => g.id === roomTeamId)
+        ?? roomGroups.find(g => g.mine) ?? roomGroups[0] ?? null;
+
+    const shownGroups = useMemo(
+        () => (shown.kind === 'room' ? roomGroups : [...teamGroups, ...listGroups]),
+        [shown.kind, roomGroups, teamGroups, listGroups],
+    );
+    const groupsOf = useCallback(
+        (key) => shownGroups.filter(g => g.keys.includes(key) || g.coach === key),
+        [shownGroups],
+    );
+    // The open game, if any: the page shows it in place of the rest, and the feed beside
+    // it follows that game rather than your players.
     const game = live.games.find(g => g.code === openGame) ?? null;
     const feed = useMemo(
         () => (game ? (live.gameEvents[game.code] ?? []) : live.events),
@@ -305,30 +365,56 @@ export default function LiveView() {
     const suggestions = useMemo(() => {
         const playing = new Set(live.games.filter(g => g.status !== 'final').flatMap(g => [g.homeCode, g.awayCode]));
         return (roster ?? [])
-            .filter(p => playing.has(euroleagueCode(p)) && typeof p.Average_Score === 'number' && !group.keys.includes(p.PlayerKey))
+            .filter(p => playing.has(euroleagueCode(p)) && typeof p.Average_Score === 'number' && !list?.keys.includes(p.PlayerKey))
             .sort((a, b) => b.Average_Score - a.Average_Score)
             .slice(0, 8);
-    }, [roster, live.games, group.keys]);
+    }, [roster, live.games, list?.keys]);
 
     const nameOf = useCallback((key, event) => rosterByKey.get(key)?.PlayerName
         ?? coachByKey.get(key)?.CoachName
         ?? (event?.name ? boxscoreName(event.name) : 'Player'), [rosterByKey, coachByKey]);
-    const openPicker = (game = null) => setPicker({ open: true, game });
     const closePicker = useCallback(() => setPicker({ open: false, game: null }), []);
-    const closeCoachPicker = useCallback(() => setCoachPicker(false), []);
+
+    // ---------------------------------------------------------------- bringing teams in
+    // Your rooms as the bring dialog needs them: a member brings another team into a
+    // private room with its invite code, which only the room's board carries.
+    const myRoomsForBring = useMemo(() => rooms.rooms.map(r => ({
+        ...r, invite_code: boards[r.id]?.invite_code ?? (rooms.board?.id === r.id ? rooms.board.invite_code : null),
+    })), [rooms.rooms, boards, rooms.board]);
+    const joinRoom = async (room, teamIds) => {
+        const rid = await rooms.join(room, teamIds, room.code ?? null);
+        if (rid) refreshRooms();
+        return rid;
+    };
+    const leaveRoom = async (roomId, teamId) => {
+        const ok = await rooms.removeTeam(roomId, teamId);
+        if (ok) refreshRooms();
+        return ok;
+    };
+    // An invite link (?room=, or pasted in the hub) opens the dialog for its room.
+    const bringRoom = bring?.room ?? (rooms.invite ? rooms.invite : null);
+    const bringIsInvite = !bring?.room && Boolean(rooms.invite);
+    const bringTeam = bring?.teamId ? teams.groups.find(t => t.id === bring.teamId) ?? null : null;
+    // The room on screen as a room card, for "+ Bring a team" there.
+    const roomCard = rooms.board ? {
+        id: rooms.board.id,
+        name: rooms.board.name,
+        visibility: rooms.board.visibility,
+        official: rooms.board.official,
+        admin: rooms.board.admin,
+        teams: roomGroups.length,
+        cap: rooms.board.cap,
+        invite_code: rooms.board.invite_code,
+        my_teams: roomGroups.filter(g => g.mine).map(g => g.id),
+    } : null;
 
     const loading = live.status === 'loading' || roster === null;
-
-    const board = (
-        <GroupBoard
-            round={live.round}
-            groups={groups}
-            selectedId={group.id}
-            onSelect={(id) => { watch.select(id); setOpenGame(null); }}
-            // A new group is empty by definition, so go straight to filling it.
-            onCreate={(name) => { watch.create(name); openPicker(); }}
-        />
-    );
+    const items = {
+        teams: teams.groups.map(t => ({ id: t.id, name: t.name })),
+        rooms: [...rooms.rooms, ...(rooms.board && !myRoomIds.includes(rooms.board.id) ? [rooms.board] : [])]
+            .map(r => ({ id: r.id, name: r.name })),
+        lists: lists.groups.map(g => ({ id: g.id, name: g.name })),
+    };
 
     return (
         <div className="space-y-5">
@@ -339,11 +425,11 @@ export default function LiveView() {
                 </div>
             )}
 
-            <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <header className="flex items-end justify-between gap-3">
                 <div>
                     <h2 className="text-2xl font-bold flex flex-wrap items-center gap-3">
                         Live
-                        {live.status === 'ready' && <StatusPill games={live.games} now={now} />}
+                        {live.status === 'ready' && <StatusPill games={live.games} nextRound={live.nextRound} now={now} />}
                     </h2>
                     <p className="text-gray-400 text-sm mt-1">
                         {live.round ? `Round ${live.round} · ` : ''}
@@ -352,30 +438,17 @@ export default function LiveView() {
                             : 'Fantasy points as the games happen'}
                     </p>
                 </div>
-                <div className="flex items-center gap-2">
-                    <button
-                        type="button"
-                        onClick={toggleSound}
-                        title={sound ? 'Chime on big plays: on' : 'Chime on big plays: off'}
-                        aria-pressed={sound}
-                        className={`p-2.5 rounded-lg border transition-colors ${sound
-                            ? 'border-purple-500/40 bg-purple-500/15 text-purple-200'
-                            : 'border-white/10 text-gray-400 hover:text-white hover:bg-white/5'}`}
-                    >
-                        {sound ? <Volume2 size={16} /> : <VolumeX size={16} />}
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => openPicker()}
-                        disabled={loading}
-                        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium text-white bg-gradient-to-r from-purple-600 to-purple-500 hover:from-purple-500 hover:to-purple-400 disabled:opacity-50"
-                    >
-                        <UserPlus size={16} /> Add players
-                        {watch.limit && (
-                            <span className="text-[11px] text-purple-200/80">{watch.allKeys.length}/{watch.limit}</span>
-                        )}
-                    </button>
-                </div>
+                <button
+                    type="button"
+                    onClick={toggleSound}
+                    title={sound ? 'Chime on big plays: on' : 'Chime on big plays: off'}
+                    aria-pressed={sound}
+                    className={`p-2.5 rounded-lg border transition-colors ${sound
+                        ? 'border-purple-500/40 bg-purple-500/15 text-purple-200'
+                        : 'border-white/10 text-gray-400 hover:text-white hover:bg-white/5'}`}
+                >
+                    {sound ? <Volume2 size={16} /> : <VolumeX size={16} />}
+                </button>
             </header>
 
             {live.status === 'error' && (
@@ -415,15 +488,15 @@ export default function LiveView() {
                                 <button
                                     type="button"
                                     onClick={() => {
-                                        watch.create(invite.name, invite.keys, { bench: invite.bench, captain: invite.captain, coach: invite.coach });
-                                        setOpenGame(null);
+                                        const id = lists.create(invite.name, invite.keys, { bench: invite.bench, captain: invite.captain, coach: invite.coach });
                                         setInvite(null);
                                         clearInvite();
-                                        flash(`${invite.name} added to your groups`);
+                                        flash(`${invite.name} added to your watchlists`);
+                                        go({ kind: 'list', id });
                                     }}
                                     className="px-3 py-1.5 rounded-lg text-xs font-medium text-white bg-purple-600 hover:bg-purple-500"
                                 >
-                                    Add group
+                                    Add watchlist
                                 </button>
                                 <button
                                     type="button"
@@ -436,102 +509,140 @@ export default function LiveView() {
                         </div>
                     )}
 
-                    <div className="grid grid-cols-1 xl:grid-cols-3 gap-5 items-start">
-                        {/* On a phone the scoreboard leads; on a wide screen it moves to the side. */}
-                        <div className="xl:hidden">{board}</div>
+                    {shown.kind !== 'home' && !game && (
+                        <HubHeader items={items} current={shown} onGo={go} onHome={goHome} />
+                    )}
 
-                        {game ? (
+                    {game ? (
+                        <div className="grid grid-cols-1 xl:grid-cols-3 gap-5 items-start">
                             <GameSection
                                 key={game.code}
                                 game={game}
                                 roster={roster}
                                 coaches={coaches}
-                                groups={groups}
+                                groups={listGroups}
                                 groupsOf={groupsOf}
                                 lastEventOf={(key) => lastEvent.get(key)}
                                 now={now}
-                                watch={watch}
-                                onOpenPlayer={(name) => openPlayer(name, CURRENT_SEASON)}
+                                watch={lists}
+                                onOpenPlayer={openPlayerNow}
                                 onBack={() => setOpenGame(null)}
                             />
-                        ) : (
-                        <section className="xl:col-span-2 space-y-3">
-                            <GroupHeader
-                                key={group.id}
-                                group={group}
-                                canDelete={groups.length > 1}
-                                onRename={(name) => watch.rename(group.id, name)}
-                                onShare={() => shareGroup(group, live.round).then(flash)}
-                                onDelete={() => watch.destroy(group.id)}
-                            />
-                            {group.rows.length === 0 ? (
-                                <EmptyState
-                                    group={group}
-                                    suggestions={suggestions}
-                                    onAdd={(key) => watch.add(group.id, key)}
-                                    onPick={() => openPicker()}
+                            <aside className="space-y-4">
+                                <ActivityFeed title={`${game.homeCode} vs ${game.awayCode}`} events={feed} nameOf={nameOf} groupsOf={groupsOf} />
+                            </aside>
+                        </div>
+                    ) : shown.kind === 'team' ? (
+                        <TeamPage
+                            group={team}
+                            rooms={roomsOf(team.id)}
+                            photos={headshots.players}
+                            crests={headshots.crests}
+                            now={now}
+                            lock={lock}
+                            round={live.round}
+                            nextRound={live.nextRound}
+                            lastEvent={lastEvent}
+                            history={live.history}
+                            view={teamView}
+                            onChangeView={changeTeamView}
+                            feed={feed}
+                            nameOf={nameOf}
+                            groupsOf={groupsOf}
+                            onOpenPlayer={openPlayerNow}
+                            onBring={() => setBring({ teamId: team.id })}
+                            onMyTeams={toMyTeams}
+                            onOpenRoom={(id) => go({ kind: 'room', id })}
+                        />
+                    ) : shown.kind === 'room' ? (
+                        <RoomView
+                            rooms={{ ...rooms, close: async (id) => { const ok = await rooms.close(id); if (ok) { refreshRooms(); goHome(); } return ok; },
+                                removeTeam: leaveRoom }}
+                            groups={roomGroups}
+                            team={roomTeam}
+                            onSelectTeam={setRoomTeamId}
+                            myTeams={teams.groups}
+                            lock={lock}
+                            now={now}
+                            history={live.history}
+                            lastEvent={lastEvent}
+                            onOpenPlayer={openPlayerNow}
+                            flash={flash}
+                            view={teamView}
+                            onChangeView={changeTeamView}
+                            photos={headshots.players}
+                            crests={headshots.crests}
+                            onBring={() => roomCard && setBring({ room: roomCard })}
+                            onMyTeams={toMyTeams}
+                            round={live.round}
+                            userId={user?.id ?? null}
+                            feed={feed}
+                            nameOf={nameOf}
+                            groupsOf={groupsOf}
+                        />
+                    ) : shown.kind === 'list' ? (
+                        <WatchlistPage
+                            group={list}
+                            watch={lists}
+                            canDelete={listGroups.length > 1}
+                            coaches={coaches}
+                            games={live.games}
+                            history={live.history}
+                            lastEvent={lastEvent}
+                            now={now}
+                            suggestions={suggestions}
+                            feed={feed}
+                            nameOf={nameOf}
+                            groupsOf={groupsOf}
+                            onAddPlayers={() => setPicker({ open: true, game: null })}
+                            onShare={() => shareGroup(list, live.round).then(flash)}
+                            onDeleted={goHome}
+                            onOpenPlayer={openPlayerNow}
+                        />
+                    ) : (
+                        // The home: your teams and the Watch Rooms on the left, the
+                        // watchlists and the plays on the right; on a phone in that order.
+                        <div className="grid grid-cols-1 xl:grid-cols-5 gap-5 items-start">
+                            <div className="xl:col-span-3 space-y-5">
+                                <MyTeamsWidget
+                                    teams={teams}
+                                    groups={teamGroups}
+                                    photos={headshots.players}
+                                    roomsOf={roomsOf}
+                                    lock={lock}
+                                    now={now}
+                                    round={live.round}
+                                    onOpen={(id) => go({ kind: 'team', id })}
+                                    onBring={(id) => setBring({ teamId: id })}
+                                    onOpenRoom={(id) => go({ kind: 'room', id })}
+                                    onMyTeams={toMyTeams}
+                                    onSignIn={() => openAuth('Save your fantasy teams')}
                                 />
-                            ) : (
-                                <LayoutGroup id={group.id}>
-                                    {[
-                                        ['Starters', group.rows.filter(r => !r.benched), null],
-                                        ['Bench', group.rows.filter(r => r.benched), 'count half'],
-                                    ].filter(([, rows], i) => i === 0 || rows.length).map(([title, rows, note]) => (
-                                        <div key={title} className="space-y-2">
-                                            <div className="flex items-baseline justify-between px-1 text-[11px] uppercase tracking-wider text-gray-500 font-semibold">
-                                                <span>
-                                                    {title} · {rows.length}
-                                                    {note && <span className="normal-case tracking-normal font-normal text-gray-600"> · {note}</span>}
-                                                </span>
-                                                <span className="font-mono normal-case tracking-normal text-gray-400">
-                                                    {fixedScore(rows.reduce((s, r) => s + (r.counted ?? 0), 0))}
-                                                </span>
-                                            </div>
-                                            <div className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-3 gap-2">
-                                                {rows.map(row => (
-                                                    <WatchCard
-                                                        key={row.key}
-                                                        row={row}
-                                                        history={live.history[row.key]}
-                                                        lastEvent={lastEvent.get(row.key)}
-                                                        now={now}
-                                                        alsoIn={groupsOf(row.key).filter(g => g.id !== group.id)}
-                                                        onRemove={() => watch.remove(group.id, row.key)}
-                                                        onToggleBench={() => watch.toggleBench(group.id, row.key)}
-                                                        onToggleCaptain={() => watch.toggleCaptain(group.id, row.key)}
-                                                        onOpen={() => openPlayer(row.player.PlayerName, CURRENT_SEASON)}
-                                                    />
-                                                ))}
-                                            </div>
-                                        </div>
-                                    ))}
-                                </LayoutGroup>
-                            )}
-                            <CoachSlot
-                                group={group}
-                                coaches={coaches}
-                                games={live.games}
-                                history={live.history}
-                                lastEvent={lastEvent}
-                                now={now}
-                                picking={coachPicker === group.id}
-                                onTogglePicker={() => setCoachPicker(id => (id === group.id ? false : group.id))}
-                                onClosePicker={closeCoachPicker}
-                                onPick={(key) => watch.toggleCoach(group.id, key)}
-                            />
-                        </section>
-                        )}
-
-                        <aside className="space-y-4">
-                            <div className="hidden xl:block">{board}</div>
-                            <ActivityFeed
-                                title={game ? `${game.homeCode} vs ${game.awayCode}` : null}
-                                events={feed}
-                                nameOf={nameOf}
-                                groupsOf={groupsOf}
-                            />
-                        </aside>
-                    </div>
+                                <RoomsWidget
+                                    rooms={rooms}
+                                    standings={standings}
+                                    boards={boards}
+                                    now={now}
+                                    onOpen={(id) => go({ kind: 'room', id })}
+                                    onJoin={(room) => setBring({ room })}
+                                    onCreated={(id) => { refreshRooms(); go({ kind: 'room', id }); }}
+                                    onSignIn={() => openAuth('Watch the round with friends')}
+                                    notify={flash}
+                                />
+                            </div>
+                            <div className="xl:col-span-2 space-y-5">
+                                <GroupBoard
+                                    round={live.round}
+                                    groups={listGroups}
+                                    selectedId={null}
+                                    onSelect={(id) => go({ kind: 'list', id })}
+                                    onCreate={(name) => { const id = lists.create(name); go({ kind: 'list', id }); setPicker({ open: true, game: null }); }}
+                                    noun="watchlists"
+                                />
+                                <ActivityFeed events={feed} nameOf={nameOf} groupsOf={groupsOf} />
+                            </div>
+                        </div>
+                    )}
                 </>
             )}
 
@@ -541,13 +652,49 @@ export default function LiveView() {
                 </div>
             )}
 
-            {picker.open && roster && (
+            {bringRoom && (
+                <BringDialog
+                    key={`room:${bringRoom.id}`}
+                    room={bringRoom}
+                    myTeams={teams.groups}
+                    onJoin={(teamId) => joinRoom(bringRoom, [teamId])}
+                    onLeave={(teamId) => leaveRoom(bringRoom.id, teamId)}
+                    onCreateTeam={(name) => teams.create(name)}
+                    onMyTeams={() => { if (bringIsInvite) rooms.dismissInvite(); setBring(null); toMyTeams(); }}
+                    // Already on the room's page, "Open the room" would go nowhere.
+                    onOpenRoom={shown.kind === 'room' && shown.id === bringRoom.id ? null
+                        : (id) => { if (bringIsInvite) rooms.dismissInvite(); setBring(null); go({ kind: 'room', id }); }}
+                    onClose={() => { if (bringIsInvite) rooms.dismissInvite(); setBring(null); }}
+                />
+            )}
+            {!bringRoom && bringTeam && (
+                <BringDialog
+                    key={`team:${bringTeam.id}`}
+                    team={bringTeam}
+                    myRooms={myRoomsForBring}
+                    publicRooms={rooms.publicRooms}
+                    onJoinRoom={(room) => joinRoom(room, [bringTeam.id])}
+                    onLeaveRoom={(roomId) => leaveRoom(roomId, bringTeam.id)}
+                    onCreateRoom={async (name, visibility) => {
+                        const rid = await rooms.create(name, visibility);
+                        if (!rid) return false;
+                        const ok = await joinRoom({ id: rid, visibility }, [bringTeam.id]);
+                        return ok ? rid : false;
+                    }}
+                    onPasteCode={(code) => { setBring(null); rooms.previewCode(code); }}
+                    onOpenRoom={(id) => { setBring(null); go({ kind: 'room', id }); }}
+                    onClose={() => setBring(null)}
+                />
+            )}
+
+            {picker.open && roster && list && (
                 <LivePicker
                     roster={roster}
+                    names={headshots.names}
                     games={live.games}
                     focusGame={picker.game}
-                    watch={watch}
-                    group={group}
+                    watch={lists}
+                    group={list}
                     round={live.round}
                     teamNames={teamNames}
                     now={now}

@@ -1,4 +1,4 @@
-import { LayoutDashboard, Users, TrendingUp, ScatterChart, Radio, Shield } from 'lucide-react';
+import { LayoutDashboard, Users, TrendingUp, ScatterChart, Radio, Shield, Shirt } from 'lucide-react';
 
 /**
  * The app's destinations, defined once.
@@ -16,6 +16,7 @@ import { LayoutDashboard, Users, TrendingUp, ScatterChart, Radio, Shield } from 
 export const NAV_ITEMS = [
     { id: 'dashboard', label: 'Dashboard', short: 'Home', icon: LayoutDashboard },
     { id: 'live', label: 'Live', short: 'Live', icon: Radio, badge: 'Beta' },
+    { id: 'teams', label: 'My Teams', short: 'Teams', icon: Shirt },
     { id: 'stats', label: 'Player Stats', short: 'Players', icon: Users, gated: true },
     { id: 'viz', label: 'Court Vision', short: 'Charts', icon: ScatterChart, gated: true },
     { id: 'matchups', label: 'Matchups', short: 'Matchups', icon: Shield, gated: true },

@@ -138,6 +138,15 @@ export const fetchDefenseVsPosition = (season, round) =>
         null
     );
 
+// Official photos for the court view: { players: { PlayerKey: url }, crests: { club: url } }.
+// Empty maps when EuroLeague's rosters are unreachable; the court shows initials then.
+export const fetchHeadshots = (season) =>
+    cached(
+        `headshots:${season}`,
+        () => client.get(`${API_URL}/headshots`, { params: { season } }),
+        { players: {}, names: {}, crests: {} }
+    );
+
 // The season's head coaches (name, club, CR) for the Live tab's coach slot. Empty when
 // the data run has not written them yet; the slot just has nobody to offer.
 export const fetchCoaches = (season) =>
@@ -145,6 +154,33 @@ export const fetchCoaches = (season) =>
         `coaches:${season}`,
         () => client.get(`${API_URL}/coaches`, { params: { season } }),
         []
+    );
+
+// My Teams' numbers: every priced player's and coach's expected FPT for the
+// next round, keyed like a lineup ("id:<n>", "coach:<n>"). See backend/utils/expected.py.
+// `options` picks how players are valued: { method: 'form' | 'average' | 'model' } and,
+// for 'form', the Recommendations settings it computes from (alpha, last_x_games,
+// weight_matchup). Cached per combination.
+export const fetchExpected = (season, options = {}) => {
+    const { method = 'model', alpha, last_x_games, weight_matchup } = options;
+    const params = method === 'form'
+        ? { season, method, alpha, last_x_games, weight_matchup }
+        : { season, method };
+    return cached(
+        `expected:${JSON.stringify(params)}`,
+        () => client.get(`${API_URL}/expected`, { params }),
+        { round: null, players: {}, coaches: {} }
+    );
+};
+
+// My Teams' Round dropdown: every player's FPT ({ "id:<n>": { "<round>": { fpt, min } } })
+// and every club's margin ({ code: { "<round>": { margin, opp, home } } }) per played
+// round. See backend/utils/round_scores.py.
+export const fetchRoundScores = (season) =>
+    cached(
+        `roundScores:${season}`,
+        () => client.get(`${API_URL}/round-scores`, { params: { season } }),
+        { rounds: [], players: {}, clubs: {} }
     );
 
 export const fetchRecommendations = (params) =>

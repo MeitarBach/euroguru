@@ -122,8 +122,9 @@ export function gameRows(game, roster, coaches = []) {
     });
 }
 
-// What a fantasy lineup role is worth: a bench player scores half, the captain double.
-export const ROLE_FACTOR = { starter: 1, captain: 2, bench: 0.5 };
+// What a fantasy lineup role is worth: the captain double, a starter and the sixth man
+// (the first player on the bench) in full, the other four on the bench half.
+export const ROLE_FACTOR = { starter: 1, captain: 2, sixth: 1, bench: 0.5 };
 const round2 = (x) => Math.round(x * 100) / 100;
 
 /**
@@ -136,7 +137,9 @@ export function inGroup(row, role = 'starter') {
     return {
         ...row,
         role,
-        benched: role === 'bench',
+        // The sixth man sits on the bench but counts in full.
+        benched: role === 'bench' || role === 'sixth',
+        sixth: role === 'sixth',
         captain: role === 'captain',
         factor,
         counted: row.score === null ? null : round2(row.score * factor),

@@ -1,0 +1,104 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="{{css}}">
+<style>
+  /* The team card: a whole fantasy squad - the starting five on a half court, the sixth
+     man, bench and coach underneath - in the post cards' look. 1200x1350, taller than a
+     post card so the court reads in the feed. */
+  html, body { width: 1200px; height: 1350px; }
+  .glow.a { width: 760px; height: 760px; }
+  .glow.b { width: 680px; height: 680px; bottom: -200px; }
+  .bg .court { display: none; } /* the card's faint court; this one has a real one */
+  .mascot { bottom: 70px; height: 360px; opacity: 0.07; }
+
+  .kpis { margin-top: 22px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+  .kpi { padding: 14px 18px 12px; border-radius: 16px; background: rgba(255, 255, 255, 0.045);
+    border: 1px solid rgba(255, 255, 255, 0.08); }
+  .kpi b { display: block; font-size: 34px; font-weight: 800; letter-spacing: -1px; font-family: "SF Mono", Menlo, monospace; }
+  .kpi small { font-size: 13px; letter-spacing: 1px; text-transform: uppercase; color: #a1a1aa; }
+  .kpi.up b { color: #34d399; } .kpi.gold b { color: #facc15; }
+
+  /* The floor: 1088x760, a FIBA half court cut short of the centre line. */
+  .floor { position: relative; margin-top: 20px; width: 1088px; height: 760px; border-radius: 22px; overflow: hidden;
+    background: radial-gradient(ellipse at 50% 0%, rgba(139, 92, 246, 0.28), rgba(139, 92, 246, 0) 60%),
+                linear-gradient(180deg, #15102a 0%, #0c0a16 100%);
+    border: 1px solid rgba(167, 139, 250, 0.30); }
+  .floor .lines { position: absolute; inset: 0; }
+  .floor .lines * { fill: none; stroke: rgba(255, 255, 255, 0.20); stroke-width: 2.5; }
+  .floor .lines .paint { fill: rgba(139, 92, 246, 0.16); stroke: rgba(196, 181, 253, 0.35); }
+  .floor .lines .board { stroke: rgba(255, 255, 255, 0.55); stroke-width: 4; }
+  .floor .lines .rim { stroke: #fb923c; stroke-width: 3.5; }
+  .floor .label { position: absolute; top: 18px; left: 22px; font-size: 14px; font-weight: 800; letter-spacing: 2px;
+    color: #c4b5fd; text-transform: uppercase; }
+  .floor .label b { color: #fff; }
+
+  /* A starter: headshot over a halo, a name plate under it. The captain gets gold. */
+  .fig { position: absolute; width: 236px; transform: translateX(-50%); }
+  .fig .bust { position: relative; height: 148px; }
+  .fig .halo, .bitem .halo { position: absolute; left: 50%; transform: translateX(-50%); border-radius: 50%;
+    background: radial-gradient(circle, rgba(139, 92, 246, 0.60), rgba(139, 92, 246, 0) 70%); }
+  .fig .halo { top: 0; width: 170px; height: 170px; }
+  .fig .shot { position: absolute; left: 50%; top: 4px; height: 290px; transform: translateX(-50%);
+    -webkit-mask-image: linear-gradient(to bottom, #000 40%, transparent 50%); }
+  .fig .initials, .bitem .initials { position: absolute; left: 50%; transform: translateX(-50%); display: flex;
+    align-items: center; justify-content: center; border-radius: 50%; font-weight: 800; color: #ddd6fe;
+    background: rgba(139, 92, 246, 0.25); border: 2px solid rgba(167, 139, 250, 0.45); }
+  .fig .initials { top: 20px; width: 110px; height: 110px; font-size: 40px; }
+  .fig .plate { position: relative; margin-top: -4px; padding: 7px 10px 8px; text-align: center; border-radius: 14px;
+    background: rgba(10, 8, 18, 0.88); border: 1px solid rgba(167, 139, 250, 0.40); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); }
+  .fig .nm { font-size: 22px; font-weight: 800; letter-spacing: -0.3px; white-space: nowrap; }
+  .fig .ln { margin-top: 1px; font-size: 15px; color: #a1a1aa; white-space: nowrap; }
+  .fig .ln b, .bitem .bln b { color: #fff; }
+  .pos { display: inline-block; margin-right: 7px; font-size: 12px; font-weight: 800; letter-spacing: 1px; color: #c4b5fd;
+    background: rgba(139, 92, 246, 0.25); border-radius: 6px; padding: 2px 6px; vertical-align: 3px; }
+  .fig.cap .plate { border-color: rgba(250, 204, 21, 0.75);
+    box-shadow: 0 0 0 1px rgba(250, 204, 21, 0.25), 0 8px 28px rgba(250, 204, 21, 0.18); }
+  .fig.cap .halo { background: radial-gradient(circle, rgba(250, 204, 21, 0.42), rgba(139, 92, 246, 0.25) 45%, rgba(139, 92, 246, 0) 70%); }
+  .capb { position: absolute; right: 38px; top: 10px; width: 34px; height: 34px; border-radius: 50%; display: flex;
+    align-items: center; justify-content: center; font-size: 18px; font-weight: 900; background: #facc15; color: #111;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5); }
+
+  /* Under the court: the sixth man (100%), the rest of the bench (50%) and the coach. */
+  .bench { margin-top: 18px; display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; }
+  .bitem { position: relative; overflow: hidden; height: 172px; padding: 0 10px 10px; text-align: center; border-radius: 16px;
+    background: rgba(255, 255, 255, 0.045); border: 1px solid rgba(255, 255, 255, 0.08); }
+  .bitem .bbust { position: relative; height: 88px; margin: 0 -10px; }
+  .bitem .halo { top: 4px; width: 104px; height: 104px; }
+  .bitem .shot { position: absolute; left: 50%; top: 8px; height: 168px; transform: translateX(-50%);
+    -webkit-mask-image: linear-gradient(to bottom, #000 40%, transparent 48%); }
+  .bitem .initials { top: 14px; width: 70px; height: 70px; font-size: 26px; }
+  .bitem .bnm { margin-top: 4px; font-size: 17px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bitem .bnm .pos { font-size: 10px; margin-right: 5px; vertical-align: 2px; }
+  .bitem .bln { margin-top: 1px; font-size: 13px; color: #a1a1aa; white-space: nowrap; }
+  .bitem .btag { margin-top: 7px; display: inline-block; font-size: 11px; font-weight: 800; letter-spacing: 1px;
+    text-transform: uppercase; padding: 3px 8px; border-radius: 6px; color: #a1a1aa; background: rgba(255, 255, 255, 0.06); }
+  .bitem.six { border-color: rgba(52, 211, 153, 0.45); }
+  .bitem.six .btag { color: #6ee7b7; background: rgba(52, 211, 153, 0.14); }
+  .bitem.coach .btag { color: #e9d5ff; background: rgba(139, 92, 246, 0.22); }
+  footer { margin-top: auto; }
+</style>
+</head>
+<body>
+  <div class="bg">
+    <div class="glow a"></div><div class="glow b"></div><div class="court"></div>
+    <img class="mascot" src="{{mascot}}" alt="">
+  </div>
+  <div class="wrap">
+    <header>
+      <div class="brand"><img src="{{mascot}}" alt=""><span>EuroGuru</span></div>
+      <div class="badge">{{badge}}</div>
+    </header>
+    <h1>{{title}}</h1>
+    <div class="sub">{{subtitle}}</div>
+    <div class="kpis">{{kpis}}</div>
+    <div class="floor">{{lines}}<div class="label">Starting five · <b>{{formation}}</b></div>{{starters}}</div>
+    <div class="bench">{{bench}}</div>
+    <footer>
+      <span class="url">eurogurufantasy.com</span>
+      <span class="pitch">Live fantasy points · stats · smart picks</span>
+    </footer>
+  </div>
+</body>
+</html>

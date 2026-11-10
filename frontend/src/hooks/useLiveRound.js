@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { currentRound } from '../lib/live/schedule';
+import { currentRound, nextRoundOf } from '../lib/live/schedule';
 import { matchLines } from '../lib/live/names';
 import { euroleagueCode } from '../lib/live/teams';
 import { RateLimitedError, winBonus, round1, coachPoints } from '../lib/live/feed';
@@ -17,6 +17,8 @@ const HIDDEN_POLL_MS = 30_000;
 const MAX_BACKOFF_MS = 60_000;
 const MAX_EVENTS = 50;
 const MAX_HISTORY = 120;
+// Between rounds, how often the round is worked out again at most.
+const ROUND_RECHECK_MS = 60 * 60_000;
 
 // How a change in a player's line reads in the feed, in the order it is listed. Every
 // stat that moves PIR is here, so a score change always comes with its reason.
@@ -91,12 +93,30 @@ export default function useLiveRound({
         setAttempt(a => a + 1);
     }, []);
 
-    // The round is chosen once per schedule load: switching rounds under someone's
-    // nose mid-session would be stranger than a page that needs a reload the next day.
+    // The latest round that has begun, so between rounds the page keeps the last one's
+    // results. `roundClock` is when it was last worked out, moved on at the next round's
+    // first tip-off (and on coming back to the tab, as timers sleep with the laptop).
+    const [roundClock, setRoundClock] = useState(() => Date.now());
     const round = useMemo(
-        () => (schedule ? currentRound(schedule, Date.now()) : null),
-        [schedule],
+        () => (schedule ? currentRound(schedule, roundClock) : null),
+        [schedule, roundClock],
     );
+    const nextRound = useMemo(
+        () => (schedule && round !== null ? nextRoundOf(schedule, round) : null),
+        [schedule, round],
+    );
+    useEffect(() => {
+        if (!nextRound) return undefined;
+        const recheck = () => setRoundClock(Date.now());
+        // Capped, so a clock that drifted while asleep is caught within the hour anyway.
+        const timer = setTimeout(recheck, Math.min(Math.max(0, nextRound.tipoff - Date.now()) + 1000, ROUND_RECHECK_MS));
+        const onVisible = () => { if (!document.hidden && Date.now() >= nextRound.tipoff) recheck(); };
+        document.addEventListener('visibilitychange', onVisible);
+        return () => {
+            clearTimeout(timer);
+            document.removeEventListener('visibilitychange', onVisible);
+        };
+    }, [nextRound, roundClock]);
     const games = useMemo(
         () => (schedule ?? []).filter(g => g.round === round).sort((a, b) => a.tipoff - b.tipoff),
         [schedule, round],
@@ -153,6 +173,9 @@ export default function useLiveRound({
         if (!ready) return undefined;
         let timer = null;
         let busy = false;
+        // A wake-up that came mid-tick (a new round, a player just added): the tick saw
+        // the old state, so run again straight after it rather than at its delay.
+        let again = false;
         let stopped = false;
         let failures = 0;
 
@@ -345,9 +368,11 @@ export default function useLiveRound({
         };
 
         const run = async () => {
-            if (busy || stopped) return;
+            if (stopped) return;
+            if (busy) { again = true; return; }
             clearTimeout(timer);
             busy = true;
+            again = false;
             let delay = MAX_BACKOFF_MS;
             try {
                 delay = await tick();
@@ -357,6 +382,7 @@ export default function useLiveRound({
                 busy = false;
             }
             if (document.hidden && !live.current.source.keepPaceHidden) delay = Math.max(delay, HIDDEN_POLL_MS);
+            if (again && !failures) delay = 0;
             if (!stopped) timer = setTimeout(run, delay);
         };
 
@@ -376,8 +402,9 @@ export default function useLiveRound({
     // rather than at the next scheduled poll.
     const watchSignature = watchKeys.join('|');
     useEffect(() => { wake.current(); }, [watchSignature]);
-    // Opening a game in the game view fetches it at once, too.
-    useEffect(() => { wake.current(); }, [focusCode]);
+    // Opening a game in the game view fetches it at once, too - and so does a new round
+    // beginning, whose games the loop was not asking about until now.
+    useEffect(() => { wake.current(); }, [focusCode, round]);
 
     const roundGames = useMemo(
         () => games.map(g => ({ ...g, status: 'scheduled', ...gameStates[g.code] })),
@@ -389,6 +416,8 @@ export default function useLiveRound({
         error: scheduleError,
         retry,
         round,
+        // The round after this one and its first tip-off ({ round, tipoff }), or null.
+        nextRound,
         games: roundGames,
         events: journal.events,
         history: journal.history,

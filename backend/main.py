@@ -9,8 +9,12 @@ from pydantic import BaseModel
 from utils.data_processing import load_and_merge_data, filter_by_cr_and_position, score_metric, only_regulars
 from utils.recommendations import recommend_players_v2
 from utils.cr_history import cr_history_payload
-from utils.defense_vs_position import defense_vs_position_payload
+from utils.defense_vs_position import defense_vs_position_payload, matchup_factors, DEFAULT_MATCHUP_WEIGHT
 from utils.coaches import coaches_payload
+from utils.headshots import headshots_payload
+from utils.expected import cached_expected_payload
+from utils.round_scores import round_scores_payload
+from utils.s3_utils import list_bucket
 from utils.auth import optional_user
 
 app = FastAPI(title="EuroGuru API")
@@ -355,6 +359,53 @@ def get_defense_vs_position(
     return payload
 
 
+@app.get("/api/expected")
+def get_expected(
+    season: str = DEFAULT_SEASON,
+    method: str = Query("model", pattern="^(form|average|model)$"),
+    alpha: float = Query(0.85, ge=0.5, le=1.0),
+    last_x_games: int = Query(5, ge=1, le=100),
+    weight_matchup: float = Query(DEFAULT_MATCHUP_WEIGHT, ge=0.0, le=1.0),
+):
+    """
+    My Teams' numbers: what every priced player and every coach is expected to score in
+    the next round, keyed like the Live tab's lineups ("id:<n>" players, "coach:<n>"
+    coaches). `method` picks how players are valued - "form" (the Recommendations tab's
+    Exp Weighted FPT with these alpha / last_x_games, moved by the next opponent at
+    weight_matchup), "average" or "model". See utils/expected.py.
+    """
+    if season not in DATA_FILES:
+        raise HTTPException(status_code=404, detail="Season not found")
+    try:
+        return cached_expected_payload(season, lambda: get_data(season), list_bucket(), method=method,
+                                       alpha=alpha, last_x_games=last_x_games, weight_matchup=weight_matchup)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="The schedule is not built for this season yet")
+
+
+@app.get("/api/round-scores")
+def get_round_scores(season: str = DEFAULT_SEASON):
+    """
+    My Teams' Round dropdown: every player's FPT and every club's margin, round by
+    round, so a roster can be replayed on any played round. See utils/round_scores.py.
+    """
+    if season not in DATA_FILES:
+        raise HTTPException(status_code=404, detail="Season not found")
+    return round_scores_payload(get_data(season))
+
+
+@app.get("/api/headshots")
+def get_headshots(season: str = DEFAULT_SEASON):
+    """
+    Official photos for the Live tab's court view: {players: {PlayerKey: url}, names:
+    {PlayerKey: full name}, crests: {club: url}}. The names are what the player searches
+    match a typed "Kendrick" against. Matched from EuroLeague's rosters - see
+    utils/headshots.py, which keeps the answer for half a day; edge_cache above covers
+    the CDN side like every route.
+    """
+    return headshots_payload(season, get_data(season))
+
+
 @app.get("/api/coaches")
 def get_coaches(season: str = DEFAULT_SEASON):
     """
@@ -380,6 +431,8 @@ class RecommendationParams(BaseModel):
     weight_efficiency: float = 2.0
     weight_mean_pir: float = 1.0
     weight_consistency: float = 1.0
+    # How much the next opponent's defense at his position moves a player's form.
+    weight_matchup: float = DEFAULT_MATCHUP_WEIGHT
     # Defaulted so a client that predates the selector still gets every position.
     position: str = "All"
 
@@ -396,13 +449,18 @@ def get_recommendations(params: RecommendationParams):
     # Never recommend a player on a handful of games: more than half of his club's.
     filtered_df = only_regulars(filtered_df, df)
 
+    # The round ahead's opponents, for the matchup term (and the Matchup column, shown
+    # whatever the weight; at 0 it leaves the ranking exactly as it was without one).
+    _, matchups = matchup_factors(params.season, df)
     recs = recommend_players_v2(
         filtered_df,
         last_x_games=params.last_x_games,
         alpha=params.alpha,
         weight_efficiency=params.weight_efficiency,
         weight_mean_pir=params.weight_mean_pir,
-        weight_consistency=params.weight_consistency
+        weight_consistency=params.weight_consistency,
+        weight_matchup=max(0.0, min(1.0, params.weight_matchup)),
+        matchups=matchups,
     )
     
     if recs is None or recs.empty:

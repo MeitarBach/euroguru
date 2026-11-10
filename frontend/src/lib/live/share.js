@@ -128,7 +128,7 @@ export async function groupCard(group, round) {
         g.fillText(row.player.position || '', 80, y + 36);
         g.fillStyle = '#fff';
         g.font = font(700, 28);
-        const role = row.isCoach ? '  (coach)' : row.captain ? '  (C)' : row.benched ? '  (bench)' : '';
+        const role = row.isCoach ? '  (coach)' : row.captain ? '  (C)' : row.sixth ? '  (6th man)' : row.benched ? '  (bench)' : '';
         g.fillText(`${row.player.PlayerName}${role}`, 130, y + 38);
         g.font = font(800, 30);
         const value = row.counted === null ? '–' : fmt(row.counted);

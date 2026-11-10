@@ -9,19 +9,35 @@ import RecommendationsView from './components/RecommendationsView';
 import CourtVisionView from './components/CourtVisionView';
 import MatchupsView from './components/MatchupsView';
 import LiveView from './components/LiveView';
+import TeamsView from './components/TeamsView';
 import { PlayerDetailProvider } from './hooks/usePlayerDetail';
 import { AuthProvider } from './hooks/useAuth';
+import { readRoomCode } from './lib/rooms';
+
+const opensLive = () => new URLSearchParams(window.location.search).has('join') || Boolean(readRoomCode());
 
 function App() {
-  // An invite link (?join=) is about the Live tab, so it opens there.
-  const [activeTab, setActiveTab] = useState(() => (new URLSearchParams(window.location.search).has('join') ? 'live' : 'dashboard'));
+  // An invite link (?join= for a watchlist, ?room= for a Watch Room) is about the Live
+  // tab, so it opens there.
+  const [activeTab, setActiveTab] = useState(() => (opensLive() ? 'live' : 'dashboard'));
   // Live is the one view that stays mounted once opened: it polls the games, and its
   // feed and sparklines are built up over the evening, so leaving it for the stats
   // table and coming back should not start it over.
-  const [liveMounted, setLiveMounted] = useState(() => new URLSearchParams(window.location.search).has('join'));
-  const selectTab = (tab) => {
-    if (tab === 'live') setLiveMounted(true);
+  const [liveMounted, setLiveMounted] = useState(opensLive);
+  // What another tab asked the Live tab to show ("Bring to a Watch Room" opens its
+  // rooms), as a fresh object each time so the same request can be made twice.
+  const [liveIntent, setLiveIntent] = useState(null);
+  // What another tab asked Recommendations to open with (My Teams' "Edit" opens its
+  // Advanced Settings); null when the tab is opened from the menu.
+  const [recsIntent, setRecsIntent] = useState(null);
+  const selectTab = (tab, intent = null) => {
+    if (tab === 'live') {
+      setLiveMounted(true);
+      if (intent) setLiveIntent({ ...intent });
+    }
+    if (tab === 'recs') setRecsIntent(intent);
     setActiveTab(tab);
+    window.scrollTo(0, 0);
   };
 
   return (
@@ -53,9 +69,11 @@ function App() {
 
             {liveMounted && (
               <div hidden={activeTab !== 'live'}>
-                <LiveView />
+                <LiveView active={activeTab === 'live'} intent={liveIntent} onNavigate={selectTab} />
               </div>
             )}
+
+            {activeTab === 'teams' && <TeamsView onNavigate={selectTab} />}
 
             {activeTab === 'stats' && <StatsView />}
 
@@ -63,7 +81,7 @@ function App() {
 
             {activeTab === 'matchups' && <MatchupsView />}
 
-            {activeTab === 'recs' && <RecommendationsView />}
+            {activeTab === 'recs' && <RecommendationsView openAdvanced={!!recsIntent?.advanced} />}
           </div>
         </main>
 

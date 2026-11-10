@@ -13,7 +13,7 @@ import InfoTip from './InfoTip';
 import { shortName, columnKey, columnLabel, columnInfo, formatCell } from '../columns';
 import {
     REC_COLUMNS, REC_COLUMN_CATEGORIES, REC_DEFAULT_IDS,
-    loadRecColumns, storeRecColumns, loadRecWeights, storeRecWeights,
+    loadRecColumns, storeRecColumns, loadRecWeights, storeRecWeights, REC_DEFAULT_WEIGHTS,
 } from '../recommendationColumns';
 import usePrefsSynced from '../hooks/usePrefsSynced';
 import { useIsNarrow } from '../hooks/useMediaQuery';
@@ -29,11 +29,7 @@ const DEFAULT_FILTERS = {
     min_cr: 0,
     max_cr: 35,
     position: 'All',
-    last_x_games: 5,
-    alpha: 0.85,
-    weight_efficiency: 2.0,
-    weight_mean_pir: 1.0,
-    weight_consistency: 1.0
+    ...REC_DEFAULT_WEIGHTS,
 };
 const BY_SCORE = { key: 'RecScore', direction: 'desc' };
 
@@ -92,9 +88,10 @@ const SliderControl = ({ label, value, onChange, min, max, step, description }) 
     </div>
 );
 
-export default function RecommendationsView() {
-    // Weights are the one part of the ranking worth remembering: they encode how
-    // someone likes to pick. Season, window and price range are per-visit questions.
+export default function RecommendationsView({ openAdvanced = false }) {
+    // The weights and the games window are the part of the ranking worth remembering:
+    // they encode how someone likes to pick, and My Teams' "Your formula" computes from
+    // them. Season and price range are per-visit questions.
     const [filters, setFilters] = useState(() => ({ ...DEFAULT_FILTERS, ...loadRecWeights() }));
 
     const [options, setOptions] = useState({
@@ -143,11 +140,11 @@ export default function RecommendationsView() {
     const [recommendations, setRecommendations] = useState([]);
     const [loading, setLoading] = useState(false);
     const [sortConfig, setSortConfig] = useState(BY_SCORE);
-    const [showAdvanced, setShowAdvanced] = useState(false);
+    const [showAdvanced, setShowAdvanced] = useState(openAdvanced);
 
     const sort = locked ? BY_SCORE : sortConfig;
 
-    // Every one of the six sliders fires per drag step; fetches follow the settled
+    // Every one of the seven sliders fires per drag step; fetches follow the settled
     // values while the controls stay responsive.
     const minCr = useDebouncedValue(filters.min_cr);
     const maxCr = useDebouncedValue(filters.max_cr);
@@ -155,6 +152,7 @@ export default function RecommendationsView() {
     const wEff = useDebouncedValue(filters.weight_efficiency);
     const wMean = useDebouncedValue(filters.weight_mean_pir);
     const wCons = useDebouncedValue(filters.weight_consistency);
+    const wMatch = useDebouncedValue(filters.weight_matchup);
 
     // Guards against an earlier, slower response overwriting a newer one.
     const requestSeq = useRef(0);
@@ -199,26 +197,28 @@ export default function RecommendationsView() {
         && alpha === filters.alpha
         && wEff === filters.weight_efficiency
         && wMean === filters.weight_mean_pir
-        && wCons === filters.weight_consistency;
+        && wCons === filters.weight_consistency
+        && wMatch === filters.weight_matchup;
 
     // Saved once a drag settles, not per step. Never while locked: those are the
     // defaults on show, not a choice anyone made.
     useEffect(() => {
         if (locked || !settled) return;
         const weights = {
-            alpha, weight_efficiency: wEff, weight_mean_pir: wMean, weight_consistency: wCons,
+            last_x_games: filters.last_x_games,
+            alpha, weight_efficiency: wEff, weight_mean_pir: wMean, weight_consistency: wCons, weight_matchup: wMatch,
         };
         // Untouched defaults on a first visit are not a choice either, and saving them
         // would overwrite weights this account set on another device.
         const untouched = Object.keys(weights).every(k => weights[k] === DEFAULT_FILTERS[k]);
         if (untouched && !Object.keys(loadRecWeights()).length) return;
         storeRecWeights(weights);
-    }, [locked, settled, alpha, wEff, wMean, wCons]);
+    }, [locked, settled, filters.last_x_games, alpha, wEff, wMean, wCons, wMatch]);
 
     useEffect(() => {
         if (!filtersReady || !settled) return;
         loadRecommendations();
-    }, [filtersReady, settled, locked, view.season, view.position, view.last_x_games, minCr, maxCr, alpha, wEff, wMean, wCons]);
+    }, [filtersReady, settled, locked, view.season, view.position, view.last_x_games, minCr, maxCr, alpha, wEff, wMean, wCons, wMatch]);
 
     const loadRecommendations = async () => {
         const seq = ++requestSeq.current;
@@ -235,6 +235,7 @@ export default function RecommendationsView() {
                     weight_efficiency: view.weight_efficiency,
                     weight_mean_pir: view.weight_mean_pir,
                     weight_consistency: view.weight_consistency,
+                    weight_matchup: view.weight_matchup,
                 }
                 : {
                     min_cr: minCr,
@@ -243,6 +244,7 @@ export default function RecommendationsView() {
                     weight_efficiency: wEff,
                     weight_mean_pir: wMean,
                     weight_consistency: wCons,
+                    weight_matchup: wMatch,
                 }),
         });
         if (seq !== requestSeq.current) return; // a newer request has taken over
@@ -440,6 +442,15 @@ export default function RecommendationsView() {
                                     step={0.1}
                                     description="Penalty for volatility"
                                 />
+                                <SliderControl
+                                    label="Matchup Weight"
+                                    value={filters.weight_matchup}
+                                    onChange={(e) => setFilters(prev => ({ ...prev, weight_matchup: parseFloat(e.target.value) }))}
+                                    min={0}
+                                    max={1}
+                                    step={0.05}
+                                    description="How much the next opponent's defense vs his position moves his form (0 = ignore, 1 = in full)"
+                                />
                             </div>
                         </motion.div>
                     )}
@@ -519,6 +530,20 @@ export default function RecommendationsView() {
                                                                         TOP PICK
                                                                     </span>
                                                                 )}
+                                                            </td>
+                                                        );
+                                                    }
+                                                    if (col.fmt === 'matchup') {
+                                                        return (
+                                                            <td key={col.id} className="px-3 md:px-6 py-3 whitespace-nowrap font-mono text-gray-400">
+                                                                {player.Opponent ? (
+                                                                    <>
+                                                                        vs {player.Opponent}{' '}
+                                                                        <span className={player.MatchupFactor > 1 ? 'text-emerald-400' : player.MatchupFactor < 1 ? 'text-red-400' : ''}>
+                                                                            ×{Number(player.MatchupFactor).toFixed(2)}
+                                                                        </span>
+                                                                    </>
+                                                                ) : '-'}
                                                             </td>
                                                         );
                                                     }
