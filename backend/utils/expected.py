@@ -1,7 +1,15 @@
 # utils/expected.py
 """
-What every player and coach is expected to score next round - the Team Optimizer's
-numbers.
+What every player and coach is expected to score next round - My Teams' numbers.
+
+Players are valued one of three ways (the `method`), the model below being "model":
+- "form": the Recommendations tab's Exp Weighted FPT - the exponentially weighted mean
+  of his last games, with the viewer's alpha and games window - moved by his next
+  opponent's defense at his position at the viewer's matchup weight
+  (defense_vs_position.matchup_factors). The default in My Teams.
+- "average": his average FPT per game played this season.
+- "model": the backtested valuation below.
+Coaches are valued the same way whichever method the players use.
 
 Ported from the social skill's team builds (.claude/skills/euroguru-social/generate.py,
 squad_pool("expected") and coach_pool), which chose this valuation by backtest: every
@@ -56,14 +64,20 @@ def coach_points(margin):
     return -20 if margin <= -21 else -10 if margin <= -11 else -5
 
 
+# The coach scoring table as margin bands: (low, high, points), a margin of 11 being
+# anything from 10.5 to 20.5 once the normal curve is laid over whole points.
+COACH_BANDS = [(-math.inf, -20.5, -20), (-20.5, -10.5, -10), (-10.5, 0, -5),
+               (0, 10.5, 10), (10.5, 20.5, 20), (20.5, math.inf, 25)]
+
+
 def coach_outlook(margin):
-    """(expected coach points, chance of a win) when the club's margin is expected to be
-    `margin`, give or take MARGIN_SD - each band of the scoring table times its chance."""
+    """(expected coach points, chance of a win, {points: chance}) when the club's margin
+    is expected to be `margin`, give or take MARGIN_SD: the chance of each band of the
+    scoring table, and their points weighted by those chances."""
     def below(x):
         return 0.5 * (1 + math.erf((x - margin) / (MARGIN_SD * math.sqrt(2))))
-    bands = [(-math.inf, -20.5, -20), (-20.5, -10.5, -10), (-10.5, 0, -5),
-             (0, 10.5, 10), (10.5, 20.5, 20), (20.5, math.inf, 25)]
-    return sum(pts * (below(hi) - below(lo)) for lo, hi, pts in bands), 1 - below(0)
+    dist = {pts: below(hi) - below(lo) for lo, hi, pts in COACH_BANDS}
+    return sum(pts * p for pts, p in dist.items()), 1 - below(0), dist
 
 
 def club_ratings(played):
@@ -159,7 +173,15 @@ def player_values(df):
 
 
 def coach_values(coaches, played, fixtures):
-    """"coach:<id>" -> {proj, win, opp, home, margin}. A club with no game scores 0."""
+    """
+    "coach:<id>" -> {likely, chance, dist, proj, win, opp, home, margin}.
+
+    A coach can only score one of six numbers, so his outlook is the chance of each
+    (`dist`, points as strings -> chance) and the one he most likely scores (`likely`,
+    with its `chance`) - what My Teams counts, since a probability-weighted 6.3 is a
+    score no coach can make. `proj` is that weighted mean, kept for comparison. A club
+    with no game scores 0, for certain.
+    """
     rating = club_ratings(played)
     nxt = {}
     for home, away in fixtures:
@@ -168,30 +190,86 @@ def coach_values(coaches, played, fixtures):
     out = {}
     for c in coaches:
         opp, home, margin = nxt.get(c.get("TeamCode"), (None, None, 0.0))
-        proj, win = coach_outlook(margin) if opp else (0.0, 0.0)
-        out[f"coach:{c['CoachID']}"] = {"proj": round(proj, 2), "win": round(win, 3), "opp": opp,
-                                        "home": home, "margin": round(margin, 1)}
+        if opp:
+            proj, win, dist = coach_outlook(margin)
+            likely = max(dist, key=dist.get)
+        else:
+            proj, win, dist, likely = 0.0, 0.0, {0: 1.0}, 0
+        out[f"coach:{c['CoachID']}"] = {
+            "likely": likely, "chance": round(dist[likely], 3),
+            "dist": {str(pts): round(p, 3) for pts, p in dist.items()},
+            "proj": round(proj, 2), "win": round(win, 3), "opp": opp,
+            "home": home, "margin": round(margin, 1),
+        }
     return out
 
 
-def expected_payload(season, df, schedule, coaches):
-    rnd, fixtures = next_round(df, schedule)
-    return {
-        "season": season,
-        "round": rnd,
-        "players": player_values(df),
-        "coaches": coach_values(coaches, played_games(df), fixtures),
-    }
+def average_values(df, model):
+    """PlayerKey -> {fpt, avail, injury}: his average per game played this season. The
+    chance he plays and his injury come from `model` (player_values), for the badges."""
+    from .data_processing import calculate_player_averages, filter_by_cr_and_position
+
+    pool = calculate_player_averages(filter_by_cr_and_position(df, 0, 100, "All"), 100)
+    out = {}
+    for p in pool.itertuples(index=False):
+        key = getattr(p, "PlayerKey", None)
+        if key is None or pd.isna(key):
+            continue
+        avg = pd.to_numeric(getattr(p, "Average_Score", None), errors="coerce")
+        base = model.get(key, {})
+        out[key] = {"fpt": round(float(avg), 2) if pd.notna(avg) else None,
+                    "avail": base.get("avail"), "injury": base.get("injury")}
+    return out
 
 
-_cache = {}
+def form_values(df, model, matchups, alpha, last_x_games, weight_matchup):
+    """
+    PlayerKey -> {fpt, base, opp, factor, avail, injury}: the Recommendations tab's Exp
+    Weighted FPT over his last `last_x_games` games at `alpha` (`base`), times his next
+    opponent's factor at `weight_matchup` (`fpt`). `matchups` is matchup_factors' map;
+    a player whose club has no fixture there keeps his form as it is. None for a priced
+    player who has not played yet.
+    """
+    from .data_processing import filter_by_cr_and_position
+    from .defense_vs_position import matchup_multiplier
+    from .recommendations import exp_weighted_form, recent_rows
+
+    rows = filter_by_cr_and_position(df, 0, 100, "All").dropna(subset=["PlayerKey"])
+    out = {}
+    for key, games in rows.groupby("PlayerKey"):
+        recent = recent_rows(games, last_x_games)
+        base = exp_weighted_form(recent, alpha)
+        team = recent["TeamCode"].iloc[0] if "TeamCode" in recent else None
+        position = recent["position"].iloc[0] if "position" in recent else None
+        opp, factors = matchups.get(team, (None, {}))
+        factor = factors.get(position) if opp else None
+        fpt = base * matchup_multiplier(factor, weight_matchup) if base is not None else None
+        info = model.get(key, {})
+        out[key] = {
+            "fpt": round(fpt, 2) if fpt is not None else None,
+            "base": round(base, 2) if base is not None else None,
+            "opp": opp, "factor": round(factor, 3) if factor is not None else None,
+            "avail": info.get("avail"), "injury": info.get("injury"),
+        }
+    return out
+
+
+METHODS = ("form", "average", "model")
+
+# The bucket's state and everything built from it alone, one season at a time: the
+# merged frame, the round ahead, the coaches and the model's values. Each method's
+# values are cached beside it, per setting - "form" has one entry per slider position,
+# so only the last few are kept.
+_base = {}
+_values = {}
+_VALUES_MAX = 32
 _cache_lock = threading.Lock()
 
 
-def cached_expected_payload(season, get_df, index):
-    """The payload, rebuilt when anything in the bucket changes - the stats, prices,
-    injuries, schedule and coaches it reads all live there. `get_df` is only called on
-    a miss (the merged frame comes back as a fresh copy every time)."""
+def _base_for(season, get_df, index):
+    """The shared part of every payload, rebuilt when anything in the bucket changes -
+    the stats, prices, injuries, schedule, coaches and matchup rollup it reads all live
+    there. `get_df` is only called on a miss (the merged frame is a fresh copy)."""
     from .coaches import coaches_payload
     from .s3_utils import load_from_s3
 
@@ -200,15 +278,65 @@ def cached_expected_payload(season, get_df, index):
         raise FileNotFoundError(f"{sched_key} is not in the bucket yet")
     stamp = (season, tuple(sorted((k, str(v)) for k, v in index.items())))
     with _cache_lock:
-        if stamp in _cache:
-            return _cache[stamp]
+        if _base.get("stamp") == stamp:
+            return _base
     df = get_df()
     try:
         coaches = coaches_payload(season, index)
     except FileNotFoundError:
         coaches = []
-    payload = expected_payload(season, df, load_from_s3(sched_key), coaches)
+    rnd, fixtures = next_round(df, load_from_s3(sched_key))
+    base = {
+        "stamp": stamp,
+        "season": season,
+        "df": df,
+        "index": index,
+        "round": rnd,
+        "coaches": coach_values(coaches, played_games(df), fixtures),
+        "model": player_values(df),
+    }
     with _cache_lock:
-        _cache.clear()  # one season at a time is all the app asks for
-        _cache[stamp] = payload
-    return payload
+        _base.clear()
+        _base.update(base)
+        _values.clear()
+        return _base
+
+
+def cached_expected_payload(season, get_df, index, method="model", alpha=0.85, last_x_games=5,
+                            weight_matchup=None):
+    """{season, round, method, players, coaches} for one method and its settings (alpha,
+    last_x_games and weight_matchup only matter to "form")."""
+    from .defense_vs_position import DEFAULT_MATCHUP_WEIGHT, matchup_factors
+
+    if method not in METHODS:
+        raise ValueError(f"Unknown method {method!r}")
+    if weight_matchup is None:
+        weight_matchup = DEFAULT_MATCHUP_WEIGHT
+    base = _base_for(season, get_df, index)
+    key = (method,) if method != "form" else (method, round(alpha, 3), int(last_x_games), round(weight_matchup, 3))
+    with _cache_lock:
+        players = _values.get((base["stamp"], key))
+    if players is None:
+        if method == "model":
+            players = base["model"]
+        elif method == "average":
+            players = average_values(base["df"], base["model"])
+        else:
+            with _cache_lock:
+                factors = _values.get((base["stamp"], "matchups"))
+            if factors is None:
+                _, factors = matchup_factors(season, base["df"], base["round"], base["index"])
+            players = form_values(base["df"], base["model"], factors, alpha, last_x_games, weight_matchup)
+            with _cache_lock:
+                _values[(base["stamp"], "matchups")] = factors
+        with _cache_lock:
+            if len(_values) >= _VALUES_MAX:
+                _values.pop(next(iter(_values)))
+            _values[(base["stamp"], key)] = players
+    return {
+        "season": season,
+        "round": base["round"],
+        "method": method,
+        "players": players,
+        "coaches": base["coaches"],
+    }

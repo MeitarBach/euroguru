@@ -1,12 +1,29 @@
 import { ROLE_FACTOR } from '../live/rows';
 import { coachPoints } from '../live/feed';
 
+// Every score a coach can make, best first (the table in backend/utils/coaches.py).
+export const COACH_OUTCOMES = [25, 20, 10, -5, -10, -20];
+
+/** A coach's score as the game shows it: "+10", "−5" (a real minus), "0". */
+export const coachScore = (pts) => (pts > 0 ? `+${pts}` : pts < 0 ? `\u2212${Math.abs(pts)}` : '0');
+
+/** A chance as a whole percentage: 0.331 -> "33%". */
+export const pct = (p) => `${Math.round((p ?? 0) * 100)}%`;
+
+/**
+ * What a coach counts for in an expected total: the score he most likely makes, not a
+ * probability-weighted mean - a coach scores 25, 20, 10, -5, -10 or -20 and nothing in
+ * between. 0 without an outlook (no game, or not loaded yet).
+ */
+export const coachExpected = (outlook) => outlook?.likely ?? 0;
+
 /**
  * A lineup's expected round score and cost, from /api/expected and the roster's prices.
  *
  * The score counts each player by his role exactly as a round does - captain x2, the
  * other starters and the sixth man (first on the bench) x1, the rest of the bench x0.5 -
- * plus the coach's expected points on his club's next game. The cost is every player's
+ * plus the score the coach most likely makes in his club's next game (coachExpected).
+ * The cost is every player's
  * CR plus the coach's, as the game's budget counts it.
  *
  * Returns { rows, coach, expected, cost, missing } where each row is
@@ -39,7 +56,7 @@ export function teamOutlook(lineup, { rosterByKey, coachByKey, expected }) {
         cr: typeof coachInfo?.CR === 'number' ? coachInfo.CR : 0,
         outlook: expected.coaches?.[lineup.coach] ?? null,
     } : null;
-    const expectedTotal = rows.reduce((s, r) => s + r.counted, 0) + (coach?.outlook?.proj ?? 0);
+    const expectedTotal = rows.reduce((s, r) => s + r.counted, 0) + coachExpected(coach?.outlook);
     const cost = rows.reduce((s, r) => s + r.cr, 0) + (coach?.cr ?? 0);
     return { rows, coach, expected: expectedTotal, cost: Math.round(cost * 10) / 10, missing };
 }

@@ -6,18 +6,9 @@ import {
     resetInvite, removeFromRoom, readRoomCode, clearRoomCode, ROOM_NAME_MAX,
 } from '../lib/rooms';
 
-const SELECTED_KEY = 'euroguru.liveRoomSelected';
 // The board's scores come from the live feed in the browser; what this refreshes is
 // who is in the room, the chat hours and, at the lock, everyone's saved lineup.
 const BOARD_REFRESH_MS = 60_000;
-
-const loadSelected = () => {
-    try {
-        return window.localStorage.getItem(SELECTED_KEY);
-    } catch {
-        return null;
-    }
-};
 
 /** A first name for a new profile: Google's given name, else the start of the full name. */
 function firstNameOf(user) {
@@ -33,7 +24,8 @@ function firstNameOf(user) {
  * resolve to a truthy value on success and report failures through `notify`.
  *
  * `openId` is the room on screen - one of yours, or a public room you are looking into
- * before joining - and null for the directory.
+ * before joining - and null when none is (the Live hub decides which page shows, so
+ * joining or creating a room does not open it: the caller navigates).
  *
  * Also owns the bits that are about you rather than a room: your nickname (made from
  * your first name on first sign-in), and an invite opened from a ?room= link.
@@ -43,7 +35,7 @@ export default function useRooms({ notify } = {}) {
     const userId = user?.id ?? null;
     const [loaded, setLoaded] = useState({ userId: null, rooms: [], status: 'idle' });
     const [version, setVersion] = useState(0);
-    const [openId, setOpenId] = useState(loadSelected);
+    const [openId, setOpenId] = useState(null);
     const [board, setBoard] = useState(null);
     const [boardVersion, setBoardVersion] = useState(0);
     const [search, setSearch] = useState('');
@@ -84,13 +76,7 @@ export default function useRooms({ notify } = {}) {
         return () => { alive = false; clearTimeout(id); };
     }, [userId, search, version]);
 
-    const open = useCallback((id) => {
-        setOpenId(id);
-        try {
-            if (id) window.localStorage.setItem(SELECTED_KEY, id);
-            else window.localStorage.removeItem(SELECTED_KEY);
-        } catch { /* falls back to the directory next time */ }
-    }, []);
+    const open = useCallback((id) => setOpenId(id ?? null), []);
 
     // The open room's board, refreshed while it is open. A room that is gone (closed,
     // or you were removed from a private one) sends you back to the directory.
@@ -151,6 +137,8 @@ export default function useRooms({ notify } = {}) {
         return () => { alive = false; };
     }, [inviteCode, userId, say]);
     const dismissInvite = useCallback(() => { setInvite(null); setInviteCode(null); clearRoomCode(); }, []);
+    // An invite link or code pasted in the hub: previewed like a ?room= link.
+    const previewCode = useCallback((code) => { setInvite(null); setInviteCode(code); }, []);
 
     const act = useCallback(async (work, done) => {
         try {
@@ -163,20 +151,21 @@ export default function useRooms({ notify } = {}) {
         }
     }, [say]);
 
-    /** Bring teams into a room: `room` is a card or board ({id, visibility}), or an invite. */
+    /**
+     * Bring teams into a room: `room` is a card or board ({id, visibility}), or an invite.
+     * Resolves to the room's id. An invite stays up until dismissed, so a second team
+     * can follow the first.
+     */
     const join = useCallback((room, teamIds, code = null) => act(
         () => joinRoom({ id: room.id, code: code ?? room.code ?? room.invite_code ?? null, teamIds }),
-        (rid) => {
-            if (invite && (invite.id === rid || invite.code === code)) dismissInvite();
-            open(rid);
-            reload(); refreshBoard();
-        },
-    ), [act, invite, dismissInvite, open, reload, refreshBoard]);
+        () => { reload(); refreshBoard(); },
+    ), [act, reload, refreshBoard]);
 
+    /** A new room, yours; resolves to its id. */
     const create = useCallback((name, visibility = 'private') => act(
         () => createRoom(String(name ?? '').trim().slice(0, ROOM_NAME_MAX) || 'Watch Room', visibility),
-        (rid) => { open(rid); reload(); },
-    ), [act, open, reload]);
+        () => reload(),
+    ), [act, reload]);
 
     const update = useCallback((id, fields) => act(
         () => updateRoom(id, fields),
@@ -206,7 +195,7 @@ export default function useRooms({ notify } = {}) {
         publicRooms: directory.key?.startsWith(`${userId}:`) ? directory.rooms : [],
         directoryStatus: directory.status,
         nickname, changeNickname,
-        inviteCode, invite, dismissInvite,
+        inviteCode, invite, dismissInvite, previewCode,
         join, create, update, close, newInvite, removeTeam,
     };
 }

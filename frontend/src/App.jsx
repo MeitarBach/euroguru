@@ -27,11 +27,15 @@ function App() {
   // What another tab asked the Live tab to show ("Bring to a Watch Room" opens its
   // rooms), as a fresh object each time so the same request can be made twice.
   const [liveIntent, setLiveIntent] = useState(null);
+  // What another tab asked Recommendations to open with (My Teams' "Edit" opens its
+  // Advanced Settings); null when the tab is opened from the menu.
+  const [recsIntent, setRecsIntent] = useState(null);
   const selectTab = (tab, intent = null) => {
     if (tab === 'live') {
       setLiveMounted(true);
       if (intent) setLiveIntent({ ...intent });
     }
+    if (tab === 'recs') setRecsIntent(intent);
     setActiveTab(tab);
     window.scrollTo(0, 0);
   };
@@ -77,7 +81,7 @@ function App() {
 
             {activeTab === 'matchups' && <MatchupsView />}
 
-            {activeTab === 'recs' && <RecommendationsView />}
+            {activeTab === 'recs' && <RecommendationsView openAdvanced={!!recsIntent?.advanced} />}
           </div>
         </main>
 

@@ -112,6 +112,17 @@ export function readRoomCode(search = window.location.search) {
     }
 }
 
+/** The invite code in what someone pasted: a whole invite link, or the code alone. Null if neither. */
+export function parseRoomCode(text) {
+    const raw = String(text ?? '').trim();
+    if (!raw) return null;
+    try {
+        const code = new URL(raw).searchParams.get('room');
+        if (code) return validCode(code);
+    } catch { /* not a link - maybe the code itself */ }
+    return validCode(raw.replace(/^.*[?&]room=/, '').replace(/[&#].*$/, ''));
+}
+
 /** Forget the invite - joined or dismissed - and drop ?room= from the address bar. */
 export function clearRoomCode() {
     try {

@@ -373,3 +373,55 @@ def defense_vs_position_payload(season, round_number, merged_df, index=None):
             _payload_cache.pop(next(iter(_payload_cache)))
         _payload_cache[cache_key] = payload
     return payload
+
+
+# --------------------------------------------------------------------------- matchups
+
+# How much a player's form is moved by his next opponent, as a share of the full factor
+# (0 = ignore the opponent, 1 = form x factor, the Matchups tab's projection). The
+# default for the Recommendations ranking and My Teams' "Your formula".
+#
+# Backtested on exp-weighted form (alpha 0.85, last 5 games) from games before each
+# round, times 1 + w x (factor - 1) with factors from the rounds before it only, against
+# what each regular then scored. Mean absolute error per player-game:
+#   2025-26 rounds 4-47 (7527, PIR):  w=0 5.717   w=0.3 5.715   w=0.5 5.718   w=1 5.746
+#   2026-27 rounds 4-10 (1383, FPT):  w=0 6.456   w=0.3 6.421   w=0.5 6.419   w=1 6.481
+# A little of the opponent helps; all of it is worse than none. The gain is small - the
+# opponent explains far less of a game than the player himself does.
+DEFAULT_MATCHUP_WEIGHT = 0.3
+
+
+def matchup_multiplier(factor, weight):
+    """A player's form multiplier for an opponent `factor` at matchup `weight`."""
+    return 1.0 + float(weight) * (float(factor) - 1.0) if factor is not None else 1.0
+
+
+def matchup_factors(season, merged_df, round_number=None, index=None):
+    """
+    (round, {TeamCode: (opponent, {G, F, C: factor})}) for a round's fixtures: how much
+    more (or less) than an average defense each club's opponent gives up per 36 minutes
+    to each position, from the rounds before it - the same factor the Matchups tab
+    projects with. `round_number` defaults to the Matchups tab's current round.
+
+    (round_number, {}) when there is nothing to build from: no rollup yet, or a round
+    the tab cannot show. A club without a game that round is simply not in the map.
+    """
+    try:
+        payload = defense_vs_position_payload(season, round_number, merged_df, index)
+    except FileNotFoundError:
+        return round_number, {}
+    if payload is None:
+        return round_number, {}
+    teams = {t["code"]: t for t in payload["teams"]}
+    league = payload["league"]
+
+    def factors_against(opp):
+        team = teams.get(opp)
+        return {p: (team["pos"][p]["p36"] / league[p]["p36"] if team and league[p]["p36"] else 1.0)
+                for p in POSITIONS}
+
+    out = {}
+    for fx in payload["fixtures"]:
+        out[fx["home"]] = (fx["away"], factors_against(fx["away"]))
+        out[fx["away"]] = (fx["home"], factors_against(fx["home"]))
+    return payload["round"], out

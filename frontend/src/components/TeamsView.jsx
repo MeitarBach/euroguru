@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Shirt, Plus, Pencil, Trash2, Tv, Lock, LogIn, Save, X, Check, Info } from 'lucide-react';
+import { Shirt, Plus, Pencil, Trash2, Tv, Lock, LogIn, Save, X, Check, Info, ChevronDown } from 'lucide-react';
 import { fetchStats, fetchCoaches, fetchExpected, fetchHeadshots, fetchRoundScores, fetchCrHistory } from '../services/api';
 import { CURRENT_SEASON } from '../seasons';
 import useTeams from '../hooks/useTeams';
@@ -7,8 +7,11 @@ import useRoundLock from '../hooks/useRoundLock';
 import useNow from '../hooks/useNow';
 import { useAuth } from '../hooks/authContext';
 import { useOpenPlayer } from '../hooks/playerDetailContext';
+import usePrefsSynced from '../hooks/usePrefsSynced';
+import { loadRecWeights, REC_DEFAULT_WEIGHTS } from '../recommendationColumns';
+import { loadStored, storeValue } from '../columns';
 import { lineupOps, cleanLineup, EMPTY_LINEUP, TEAM_LIMIT, STARTERS, BENCH } from '../lib/teams';
-import { teamOutlook, teamRound, pricesByRound, crChange } from '../lib/optimizer/score';
+import { teamOutlook, teamRound, pricesByRound, crChange, coachExpected, pct, COACH_OUTCOMES, coachScore } from '../lib/optimizer/score';
 import { countdown, marginText } from '../lib/live/format';
 import LineupEditor from './teams/LineupEditor';
 import TeamCourt from './live/TeamCourt';
@@ -51,12 +54,12 @@ function courtGroup(outlook, lineup, past = false) {
         key: c.key,
         code: c.coach.TeamCode,
         player: { PlayerName: c.coach.CoachName },
-        counted: past ? c.points : o?.proj ?? 0,
+        counted: past ? c.points : coachExpected(o),
         cr: c.cr,
         state: past ? 'final' : 'expected',
         note: past
             ? (c.game ? marginText(c.game.margin, true) : 'no game')
-            : o?.opp ? `${o.home ? 'vs' : '@'} ${o.opp}` : 'no game',
+            : o?.opp ? `${o.home ? 'vs' : '@'} ${o.opp} · ${pct(o.chance)}` : 'no game',
     } : null;
     // The bench in the lineup's own order: its first is the sixth man.
     const shown = new Set(rows.map(r => r.key));
@@ -64,6 +67,74 @@ function courtGroup(outlook, lineup, past = false) {
 }
 const DRAFT = 'draft';
 const one = (x) => x.toFixed(1);
+
+// How a player's expected FPT is worked out (backend/utils/expected.py), remembered and
+// synced with the account. "Your formula" is your Recommendations settings.
+const METHOD_KEY = 'euroguru.teamsExpectedMethod';
+const loadRecSettings = () => ({ ...REC_DEFAULT_WEIGHTS, ...loadRecWeights() });
+const COACH_NOTE = `Coaches count the score they most likely make (${COACH_OUTCOMES.map(coachScore).join(', ')}) `
+    + "from their club's expected margin next game.";
+
+/** The three ways, each in a line. `rec` is your Recommendations settings. */
+const METHODS = [
+    { id: 'form', label: 'Your formula', line: () => 'Same formula as your Recommendations page settings.' },
+    { id: 'average', label: 'Season average', line: () => 'His average per game this season. Nothing else.' },
+    { id: 'model', label: 'EuroGuru model', line: () => 'Average, adjusted for price and how often he plays. Best in backtests, but runs high.' },
+];
+const methodOf = (id) => METHODS.find(m => m.id === id) ?? METHODS[0];
+const loadMethod = () => methodOf(loadStored(METHOD_KEY, 'form')).id;
+
+/** What the selected method means, for its tooltip. */
+function methodNote(method, rec) {
+    const m = methodOf(method);
+    return `Expected by ${m.label}: ${m.line(rec)} ${COACH_NOTE}`;
+}
+
+/** Which way expected FPT is worked out: the chosen one, opening into all three. */
+function MethodSwitch({ method, onChange, rec, onSettings }) {
+    const [open, setOpen] = useState(false);
+    return (
+        <div>
+            <button
+                type="button"
+                aria-expanded={open}
+                onClick={() => setOpen(o => !o)}
+                className="inline-flex items-center gap-1.5 text-sm"
+            >
+                <span className="text-[11px] uppercase tracking-wider text-gray-500 font-semibold">Expected by</span>
+                <span className="text-white font-medium">{methodOf(method).label}</span>
+                <ChevronDown size={14} className={`text-gray-500 transition-transform ${open ? 'rotate-180' : ''}`} />
+            </button>
+            {open && (
+                <div role="radiogroup" aria-label="Expected by" className="mt-2 space-y-0.5">
+                    {METHODS.map(m => {
+                        const on = m.id === method;
+                        return (
+                            <div key={m.id} className={`flex items-baseline gap-2 px-2 py-1.5 rounded-md ${on ? 'bg-purple-500/10' : 'hover:bg-white/[0.04]'}`}>
+                                <button
+                                    type="button"
+                                    role="radio"
+                                    aria-checked={on}
+                                    onClick={() => { onChange(m.id); setOpen(false); }}
+                                    className="flex-1 min-w-0 flex items-baseline gap-2 text-left text-sm"
+                                >
+                                    <Check size={13} className={`shrink-0 self-center ${on ? 'text-purple-300' : 'invisible'}`} />
+                                    <span className={`shrink-0 ${on ? 'text-white font-medium' : 'text-gray-300'}`}>{m.label}</span>
+                                    <span className="text-xs text-gray-500">{m.line(rec)}</span>
+                                </button>
+                                {m.id === 'form' && (
+                                    <button type="button" onClick={onSettings} className="shrink-0 text-xs text-purple-300 hover:text-purple-200">
+                                        Edit
+                                    </button>
+                                )}
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+        </div>
+    );
+}
 
 const loadBudget = () => {
     try {
@@ -86,13 +157,14 @@ function Stat({ label, children, tone = '' }) {
 }
 
 /** What the team scores and costs, against the budget you entered. */
-function Summary({ outlook, budget, onBudget, round }) {
+function Summary({ outlook, budget, onBudget, round, children }) {
     const cap = budget === '' ? null : Number(budget);
     const over = cap !== null && outlook.cost > cap;
     const pct = cap ? Math.min(100, (outlook.cost / cap) * 100) : 0;
     const players = outlook.rows.length;
     return (
         <div className="glass-panel p-4 space-y-3">
+            {children}
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                 <Stat label={round ? `Expected · Round ${round}` : 'Expected'} tone="text-white">
                     {one(outlook.expected)} <span className="text-sm font-medium text-gray-500">FPT</span>
@@ -194,12 +266,24 @@ export default function TeamsView({ onNavigate }) {
         let alive = true;
         fetchStats(ROSTER_QUERY).then(rows => { if (alive) setRoster(rows ?? []); });
         fetchCoaches(CURRENT_SEASON).then(rows => { if (alive) setCoaches(Array.isArray(rows) ? rows : []); });
-        fetchExpected(CURRENT_SEASON).then(e => { if (alive && e) setExpected(e); });
         fetchHeadshots(CURRENT_SEASON).then(map => { if (alive && map?.players) setHeadshots(map); });
         fetchRoundScores(CURRENT_SEASON).then(d => { if (alive && d?.rounds) setRoundScores(d); });
         fetchCrHistory(CURRENT_SEASON).then(d => { if (alive && d) setCrHistory(d); });
         return () => { alive = false; };
     }, []);
+    // How expected FPT is worked out, and the Recommendations settings "Your formula"
+    // reads - both re-read when an account's settings land on this device.
+    const [method, setMethod] = useState(loadMethod);
+    const [rec, setRec] = useState(loadRecSettings);
+    usePrefsSynced(() => { setMethod(loadMethod()); setRec(loadRecSettings()); });
+    const changeMethod = (next) => { setMethod(next); storeValue(METHOD_KEY, next); };
+    useEffect(() => {
+        let alive = true;
+        fetchExpected(CURRENT_SEASON, {
+            method, alpha: rec.alpha, last_x_games: rec.last_x_games, weight_matchup: rec.weight_matchup,
+        }).then(e => { if (alive && e) setExpected(e); });
+        return () => { alive = false; };
+    }, [method, rec.alpha, rec.last_x_games, rec.weight_matchup]);
     const rosterByKey = useMemo(() => new Map((roster ?? []).map(p => [p.PlayerKey, p])), [roster]);
     const coachByKey = useMemo(() => new Map(coaches.map(c => [`coach:${c.CoachID}`, c])), [coaches]);
 
@@ -270,7 +354,7 @@ export default function TeamsView({ onNavigate }) {
                     </h2>
                     <p className="text-gray-400 text-sm mt-1 flex items-center gap-1.5">
                         Build a roster and see what it's expected to score{expected.round ? ` in Round ${expected.round}` : ''} and what it costs.
-                        <span title="Expected FPT = the chance he plays (his share of his club's last 5 games) x his season average pulled toward what his price implies. Coaches: their club's expected margin next game. Backtested on 2025-26: the best squads on it averaged 134 a round at 105 CR - and came in about 18 under their projection, so read totals as optimistic." className="text-gray-600 hover:text-gray-300 cursor-help">
+                        <span title={methodNote(method, rec)} className="text-gray-600 hover:text-gray-300 cursor-help">
                             <Info size={14} />
                         </span>
                     </p>
@@ -278,7 +362,7 @@ export default function TeamsView({ onNavigate }) {
                 {team && (
                     <button
                         type="button"
-                        onClick={() => onNavigate?.('live', { mode: 'rooms' })}
+                        onClick={() => onNavigate?.('live', { bring: team.id })}
                         className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium text-white bg-gradient-to-r from-purple-600 to-purple-500 hover:from-purple-500 hover:to-purple-400"
                     >
                         <Tv size={16} /> Bring to a Watch Room
@@ -375,7 +459,9 @@ export default function TeamsView({ onNavigate }) {
             ) : (
                 <div className="grid grid-cols-1 xl:grid-cols-5 gap-5 items-start">
                     <section className="xl:col-span-3 space-y-4">
-                        <Summary outlook={outlook} budget={budget} onBudget={changeBudget} round={expected.round} />
+                        <Summary outlook={outlook} budget={budget} onBudget={changeBudget} round={expected.round}>
+                            <MethodSwitch method={method} onChange={changeMethod} rec={rec} onSettings={() => onNavigate?.('recs', { advanced: true })} />
+                        </Summary>
                         {/* The round shown: next round's expected numbers, or a played one
                             replayed with this roster. On a phone the result drops below. */}
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">

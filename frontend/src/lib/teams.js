@@ -128,6 +128,14 @@ export const renameTeam = (id, name) =>
 
 export const deleteTeam = (id) => run(db.from('teams').delete().eq('id', id));
 
+/**
+ * Your teams' lineups as they stood at one round's lock - the lineups that played it -
+ * as [{ team_id, lineup }]. Saved by the database's snapshot job (team_rounds); a team
+ * made after that round has none.
+ */
+export const listPlayedLineups = (season, round) =>
+    run(db.from('team_rounds').select('team_id, lineup').eq('season', Number(season)).eq('round', Number(round)));
+
 // --------------------------------------------------------------------------- rounds
 
 /** Every round's lock window for a season, oldest first. Readable signed out. */

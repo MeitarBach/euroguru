@@ -3,7 +3,8 @@ import { Crown, ArrowDown, ArrowUp, X, Star, Plus } from 'lucide-react';
 import { STARTERS, BENCH } from '../../lib/teams';
 import { euroleagueCode } from '../../lib/live/teams';
 import { marginText } from '../../lib/live/format';
-import { crChange } from '../../lib/optimizer/score';
+import { crChange, coachExpected, coachScore, pct } from '../../lib/optimizer/score';
+import CoachOdds from './CoachOdds';
 
 const ROLE_LABEL = { captain: 'Captain · x2', starter: 'x1', sixth: '6th man · x1', bench: 'Bench · x0.5' };
 const one = (x) => (x === null || x === undefined ? '–' : x.toFixed(1));
@@ -137,7 +138,7 @@ export default function LineupEditor({ outlook, editable, past = null, onAction,
                 ))}
             </Section>
 
-            <Section title="Coach" note="scores his club's margin" total={past !== null ? coach?.points : o ? o.proj : undefined}>
+            <Section title="Coach" note="scores his club's margin - counted at his most likely score" total={past !== null ? coach?.points : o ? coachExpected(o) : undefined}>
                 {coach ? (
                     <div className="flex items-center gap-2.5 px-3 py-2 rounded-lg border border-violet-500/25 bg-violet-500/[0.04]">
                         <span className="w-6 text-center px-1 rounded bg-violet-500/20 text-violet-200 text-[10px] font-bold shrink-0">HC</span>
@@ -147,12 +148,17 @@ export default function LineupEditor({ outlook, editable, past = null, onAction,
                                 {coach.coach?.TeamCode ?? ''} · {one(coach.coach?.CR)} CR
                                 {past !== null
                                     ? (game ? <> · {marginText(game.margin, true)} {game.home ? 'vs' : '@'} {game.opp}</> : ' · no game')
-                                    : o?.opp ? <> · {o.home ? 'vs' : '@'} {o.opp} · {Math.round(o.win * 100)}% to win</> : ' · no game'}
+                                    : o?.opp ? <> · {o.home ? 'vs' : '@'} {o.opp} · {pct(o.win)} to win</> : ' · no game'}
                             </span>
+                            {past === null && <CoachOdds outlook={o} className="mt-1" />}
                         </span>
                         <span className="text-right shrink-0">
-                            <span className="block font-mono text-sm text-white tabular-nums">{one(past !== null ? coach.points : o?.proj ?? 0)}</span>
-                            <span className="block text-[10px] text-gray-600">{past !== null ? `Round ${past}` : 'expected'}</span>
+                            <span className="block font-mono text-sm text-white tabular-nums">
+                                {past !== null ? one(coach.points) : coachScore(coachExpected(o))}
+                            </span>
+                            <span className="block text-[10px] text-gray-600">
+                                {past !== null ? `Round ${past}` : o?.opp ? `most likely · ${pct(o.chance)}` : 'expected'}
+                            </span>
                         </span>
                         {editable && (
                             <span className="flex items-center shrink-0">

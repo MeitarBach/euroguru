@@ -48,18 +48,43 @@ def recommend_players(df, last_x_games=10, lambda_decay=0.1, w1=1, w2=1, w3=1):
     # st.write(recommendations_df[['PlayerName', 'PIR_Avg', 'StdErr', 'CR', 'position', 'Score']].head(10))
     return recommendations_df
 
-def recommend_players_v2(df, 
-                         last_x_games=5, 
-                         alpha=0.85, 
+def recent_rows(player_rows, last_x_games):
+    """A player's last `last_x_games` rows, newest first - the window every form figure uses."""
+    return player_rows.sort_values('GameCode', ascending=False).head(last_x_games)
+
+
+def exp_weighted_form(recent, alpha):
+    """
+    The exponentially weighted mean score of `recent` (recent_rows' output, newest
+    first): the i-th game back weighs alpha^i, so alpha near 1 keeps older games in play
+    and a small one leaves only the last few. None when none of the games has a score
+    (a priced player who has not played yet). The Recommendations tab's Exp Weighted FPT,
+    and My Teams' "Your formula" before the matchup.
+    """
+    scores = pd.to_numeric(recent['Score'], errors='coerce').values[::-1]  # oldest -> newest
+    if not len(scores) or np.all(np.isnan(scores)):
+        return None
+    scores = np.nan_to_num(scores, nan=0.0)
+    weights = np.array([alpha**i for i in range(len(scores))])[::-1]  # newest weighs 1
+    total = np.sum(weights)
+    return float(np.sum(scores * weights) / total) if total > 0 else 0.0
+
+
+def recommend_players_v2(df,
+                         last_x_games=5,
+                         alpha=0.85,
                          weight_efficiency=2.0,
                          weight_mean_pir=1.0,
-                         weight_consistency=1.0):
+                         weight_consistency=1.0,
+                         weight_matchup=0.0,
+                         matchups=None):
     """
     Recommend top players using:
       - Exponential decay weighting for recent games
+      - The next opponent's defense against the player's position
       - Cost efficiency (PIR relative to CR)
       - Consistency penalty (via std err)
-    
+
     Parameters:
     -----------
     df : pd.DataFrame
@@ -68,30 +93,37 @@ def recommend_players_v2(df,
         How many recent games to consider for each player.
     alpha : float
         Decay factor for exponential weighting (0 < alpha < 1).
-        Closer to 1.0 means older games still matter quite a bit; 
+        Closer to 1.0 means older games still matter quite a bit;
         smaller means older games quickly become negligible.
     weight_efficiency : float
         The relative importance of cost-efficiency (PIR / CR).
     weight_mean_pir : float
         The relative importance of raw average PIR (exp-weighted).
     weight_consistency : float
-        The importance of penalizing players for high volatility 
+        The importance of penalizing players for high volatility
         (higher means a bigger penalty for large std error).
+    weight_matchup : float
+        How much of the opponent factor moves the form (0 = none, 1 = all of it):
+        see defense_vs_position.matchup_multiplier.
+    matchups : dict or None
+        defense_vs_position.matchup_factors' map, {TeamCode: (opponent, {G/F/C: factor})}.
+        Without it (or for a club with no game) the form is used as it is.
     """
+    from .defense_vs_position import matchup_multiplier
 
     # Basic checks
     necessary_cols = {'PlayerName', 'Score', 'CR', 'GameCode'}
     if not necessary_cols.issubset(df.columns):
         print(f"DataFrame missing required columns: {necessary_cols - set(df.columns)}")
         return None
+    matchups = matchups or {}
 
     # Group by player
     grouped = df.groupby('PlayerName', group_keys=True)
     recommendations = []
 
     for player_name, player_data in grouped:
-        # Sort player's games by descending GameCode
-        player_data_sorted = player_data.sort_values('GameCode', ascending=False).head(last_x_games)
+        player_data_sorted = recent_rows(player_data, last_x_games)
 
         # If no games in the chosen range, skip
         if player_data_sorted.empty:
@@ -106,23 +138,21 @@ def recommend_players_v2(df,
             cr = np.inf
 
         # 1. Exponential Weighted Mean Score
-        #    For the i-th game (from most recent to oldest), weight = alpha^i
-        #    More recent = smaller i, bigger weight.
-        score_values = pd.to_numeric(player_data_sorted['Score'], errors='coerce').values[::-1]  # oldest -> newest
-        if np.all(np.isnan(score_values)):
+        exp_weighted_score = exp_weighted_form(player_data_sorted, alpha)
+        if exp_weighted_score is None:
             # Priced player with no games played yet (pre-season, or a new signing).
             continue
-        score_values = np.nan_to_num(score_values, nan=0.0)
-        weights = np.array([alpha**i for i in range(len(score_values))])[::-1]  # newest -> oldest
 
-        weighted_sum = np.sum(score_values * weights)
-        total_weights = np.sum(weights)
-        exp_weighted_score = weighted_sum / total_weights if total_weights > 0 else 0
+        # 2. The next game: the form moved by the opponent's defense at his position.
+        team = player_data_sorted['TeamCode'].iloc[0] if 'TeamCode' in player_data_sorted else None
+        opponent, factors = matchups.get(team, (None, {}))
+        factor = factors.get(position) if opponent else None
+        next_game = exp_weighted_score * matchup_multiplier(factor, weight_matchup)
 
-        # 2. Cost Efficiency (exp_weighted_score / CR)
-        efficiency = exp_weighted_score / cr if cr > 0 else 0
+        # 3. Cost Efficiency (next-game score / CR)
+        efficiency = next_game / cr if cr > 0 else 0
 
-        # 3. Consistency Penalty -> standard deviation or standard error
+        # 4. Consistency Penalty -> standard deviation or standard error
         #    We can measure how stable the player's recent scoring is.
         score_std = player_data_sorted['Score'].std(ddof=1) if len(player_data_sorted) > 1 else 0
         n_games = len(player_data_sorted)
@@ -131,11 +161,11 @@ def recommend_players_v2(df,
             stderr = 0
 
         # Combine them into a single ranking score
-        #   RecScore = weight_mean_pir*(exp_weighted_score)
+        #   RecScore = weight_mean_pir*(next-game score)
         #            + weight_efficiency*(efficiency)
         #            - weight_consistency*(stderr)
         rec_score = (
-            weight_mean_pir * exp_weighted_score
+            weight_mean_pir * next_game
             + weight_efficiency * efficiency
             - weight_consistency * stderr
         )
@@ -146,6 +176,9 @@ def recommend_players_v2(df,
             'PlayerKey': (player_data_sorted['PlayerKey'].iloc[0]
                           if 'PlayerKey' in player_data_sorted else None),
             'ExpWeightedScore': exp_weighted_score,
+            'NextGameFPT': next_game,
+            'Opponent': opponent or '',
+            'MatchupFactor': round(float(factor), 3) if factor is not None else None,
             'Efficiency': efficiency,
             'CR': cr,
             'position': position,

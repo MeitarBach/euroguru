@@ -17,8 +17,6 @@ const FIXTURE_TIME_ZONE = 'Europe/Paris';
 
 const MONTHS = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 };
 
-const HOUR = 60 * 60 * 1000;
-
 /** Minutes a time zone is ahead of UTC at a given instant. */
 function offsetMinutes(utcMs, timeZone) {
     const parts = new Intl.DateTimeFormat('en-US', {
@@ -89,26 +87,25 @@ export function loadSchedule(seasonCode) {
     return schedules.get(seasonCode);
 }
 
-// How long after tip-off a game counts as possibly still running, for choosing the
-// round before any live data has been read. Generous: overtime and long reviews happen.
-const LIVE_SPAN = 2.75 * HOUR;
-
 /**
- * Which round the page is about.
+ * Which round the page is about: the latest round that has begun, so between rounds the
+ * page keeps the last one's results, and moves on at the next round's first tip-off -
+ * the moment lineups lock, too. Before the season's first game, the first round.
  *
- * A round can span two days (Thursday and Friday of a double week), so this picks a
- * round rather than a date: the round of a game that may be live; else the round of a
- * game starting within 12 hours; else the round of a game that started in the last 18
- * hours, so the morning after still shows last night's results; else the next round.
+ * The latest round by number, not the round of the latest game: a postponed game played
+ * weeks late must not drag the page back to its old round.
  */
 export function currentRound(games, now) {
     if (!games.length) return null;
-    const started = games.filter(g => g.tipoff <= now).sort((a, b) => b.tipoff - a.tipoff);
-    const upcoming = games.filter(g => g.tipoff > now).sort((a, b) => a.tipoff - b.tipoff);
+    const started = games.filter(g => g.tipoff <= now);
+    if (started.length) return Math.max(...started.map(g => g.round));
+    return games.reduce((first, g) => (g.tipoff < first.tipoff ? g : first)).round;
+}
 
-    const live = started.find(g => now - g.tipoff < LIVE_SPAN);
-    if (live) return live.round;
-    if (upcoming[0] && upcoming[0].tipoff - now < 12 * HOUR) return upcoming[0].round;
-    if (started[0] && now - started[0].tipoff < 18 * HOUR) return started[0].round;
-    return (upcoming[0] ?? started[0]).round;
+/** The round after `round` and its first tip-off ({ round, tipoff }), or null after the last. */
+export function nextRoundOf(games, round) {
+    const later = games.filter(g => g.round > round);
+    if (!later.length) return null;
+    const first = later.reduce((a, g) => (g.tipoff < a.tipoff ? g : a));
+    return { round: first.round, tipoff: first.tipoff };
 }

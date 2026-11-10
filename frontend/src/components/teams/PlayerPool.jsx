@@ -3,6 +3,7 @@ import { Check, Plus } from 'lucide-react';
 import { euroleagueCode } from '../../lib/live/teams';
 import { nameMatches } from '../../lib/live/names';
 import SearchInput from '../SearchInput';
+import { COACH_OUTCOMES, coachExpected, coachScore, pct } from '../../lib/optimizer/score';
 
 const fold = (text) => String(text ?? '').normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase();
 const one = (x) => (x === null || x === undefined || Number.isNaN(x) ? '–' : x.toFixed(1));
@@ -76,7 +77,9 @@ export default function PlayerPool({
     const coachList = useMemo(() => (coaches ?? []).map(c => {
         const key = `coach:${c.CoachID}`;
         return { key, coach: c, outlook: expected.coaches?.[key] ?? null, cr: typeof c.CR === 'number' ? c.CR : null };
-    }).sort((a, b) => (b.outlook?.proj ?? -99) - (a.outlook?.proj ?? -99)), [coaches, expected]);
+    // Best most-likely score first; among equals, the likelier win.
+    }).sort((a, b) => ((b.outlook?.likely ?? -99) - (a.outlook?.likely ?? -99))
+        || ((b.outlook?.win ?? 0) - (a.outlook?.win ?? 0))), [coaches, expected]);
 
     return (
         <div className="glass-panel p-4 space-y-3">
@@ -153,7 +156,9 @@ export default function PlayerPool({
             ) : (
                 <div className="space-y-0.5">
                     <div className="grid grid-cols-[1fr_4.5rem_3.5rem_3rem] gap-2 px-2.5 pb-1 text-[10px] uppercase tracking-wider text-gray-600">
-                        <span>Coach</span><span>Next</span><span className="text-right">Exp</span><span className="text-right">CR</span>
+                        <span>Coach</span><span>Next</span>
+                        <span className="text-right" title="The score he most likely makes, and its chance">Likely</span>
+                        <span className="text-right">CR</span>
                     </div>
                     {coachList.map(c => {
                         const selected = lineup.coach === c.key;
@@ -175,11 +180,14 @@ export default function PlayerPool({
                                     {c.outlook?.opp ? (
                                         <>
                                             <span className="block">{c.outlook.home ? 'vs' : '@'} {c.outlook.opp}</span>
-                                            <span className="block text-[11px] text-gray-500">{Math.round(c.outlook.win * 100)}% win</span>
+                                            <span className="block text-[11px] text-gray-500">{pct(c.outlook.win)} win</span>
                                         </>
                                     ) : 'No game'}
                                 </span>
-                                <span className="text-right font-mono text-white tabular-nums">{one(c.outlook?.proj ?? 0)}</span>
+                                <span className="text-right" title={c.outlook?.dist ? COACH_OUTCOMES.map(p => `${coachScore(p)}: ${pct(c.outlook.dist[String(p)])}`).join('  ') : undefined}>
+                                    <span className="block font-mono text-white tabular-nums">{coachScore(coachExpected(c.outlook))}</span>
+                                    {c.outlook?.opp && <span className="block text-[11px] text-gray-500 tabular-nums">{pct(c.outlook.chance)}</span>}
+                                </span>
                                 <span className="text-right font-mono text-gray-400 tabular-nums">{one(c.cr)}</span>
                             </button>
                         );

@@ -158,12 +158,20 @@ export const fetchCoaches = (season) =>
 
 // My Teams' numbers: every priced player's and coach's expected FPT for the
 // next round, keyed like a lineup ("id:<n>", "coach:<n>"). See backend/utils/expected.py.
-export const fetchExpected = (season) =>
-    cached(
-        `expected:${season}`,
-        () => client.get(`${API_URL}/expected`, { params: { season } }),
+// `options` picks how players are valued: { method: 'form' | 'average' | 'model' } and,
+// for 'form', the Recommendations settings it computes from (alpha, last_x_games,
+// weight_matchup). Cached per combination.
+export const fetchExpected = (season, options = {}) => {
+    const { method = 'model', alpha, last_x_games, weight_matchup } = options;
+    const params = method === 'form'
+        ? { season, method, alpha, last_x_games, weight_matchup }
+        : { season, method };
+    return cached(
+        `expected:${JSON.stringify(params)}`,
+        () => client.get(`${API_URL}/expected`, { params }),
         { round: null, players: {}, coaches: {} }
     );
+};
 
 // My Teams' Round dropdown: every player's FPT ({ "id:<n>": { "<round>": { fpt, min } } })
 // and every club's margin ({ code: { "<round>": { margin, opp, home } } }) per played
