@@ -78,14 +78,17 @@ python promote.py --yes
 
 ## 4b. Round locks and chat hours (after a promote)
 Teams' lineups lock per round in Supabase (`public.rounds`, see
-`supabase/migrations/*_teams_and_leagues.sql`), and a Watch Room's chat opens an hour
-before each tip-off (`public.fixtures`, see `*_watch_rooms.sql`). After a promote, refresh
-both from the schedule - a postponed game moves them:
+`supabase/migrations/*_teams_and_leagues.sql`), a Watch Room's chat opens an hour
+before each tip-off (`public.fixtures`, see `*_watch_rooms.sql`), and during a round a
+player whose game has started can only move down a lineup - which needs each fixture's
+clubs and each player's club (`public.player_clubs`, see `*_round_subs.sql`). After a
+promote, refresh all three - a postponed game or a transfer moves them:
 ```bash
 python -m utils.rounds 2026 > /tmp/rounds.sql   # from backend/, with the environment
 ```
-Apply the two printed upserts with the Supabase MCP `execute_sql` (project
-`iijewijzcnjjjlasupho`). They insert new rounds and games and move changed ones; nothing else.
+Apply the three printed upserts with the Supabase MCP `execute_sql` (project
+`iijewijzcnjjjlasupho`). They insert new rounds, games and players and move changed ones;
+nothing else.
 
 ## 5. Confirm prod and wrap up
 `GET https://euroguru-api.vercel.app/api/player?name=<TOP_SCORER>&season=2026` must list

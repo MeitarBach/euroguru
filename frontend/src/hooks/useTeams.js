@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from './authContext';
 import {
-    listTeams, createTeam, saveLineup, renameTeam, deleteTeam, cleanLineup, lineupOps,
+    listTeams, createTeam, saveLineup, renameTeam, deleteTeam, cleanLineup, lineupOps, inRoundRefusal,
     TEAM_LIMIT, STARTERS, BENCH, EMPTY_LINEUP,
 } from '../lib/teams';
 
@@ -21,21 +21,23 @@ const lineupOf = (team) => cleanLineup(team?.lineup ?? EMPTY_LINEUP);
 
 /**
  * Your fantasy teams, saved to your account: up to 5, each 5 starters (one captain),
- * 5 bench and a coach, frozen while a round is on.
+ * 5 bench and a coach. While a round is on a team keeps its players and coach, and can
+ * only sub and move the armband (lib/teams.js's inRoundRefusal).
  *
  * Shaped like useWatchGroups - groups, selected, add, remove, toggleBench,
  * toggleCaptain, toggleCoach, create, rename, destroy - so the Live tab's cards,
  * picker, box score and board work on a team exactly as on a watchlist. What differs:
  *   - a change is saved to Supabase; the screen updates at once and goes back if the
  *     database says no (a lock that started a second ago, a team deleted elsewhere);
- *   - a full team or a locked round refuses the change and says why through `notify`
- *     rather than failing silently;
+ *   - a full team, or a transfer while a round is on, refuses the change and says why
+ *     through `notify` rather than failing silently;
  *   - the last team can be deleted: there is no "always somewhere to put a player".
  *
- * `lock` is useRoundLock's answer. Signed out there are no teams: `signedIn` is false
- * and every change is refused.
+ * `lock` is useRoundLock's answer. `inRound` tells the in-round rule about players:
+ * { started(key), nameOf(key) } - whether his game has tipped off, and his name. Signed
+ * out there are no teams: `signedIn` is false and every change is refused.
  */
-export default function useTeams({ lock, notify } = {}) {
+export default function useTeams({ lock, notify, inRound } = {}) {
     const { user } = useAuth();
     const userId = user?.id ?? null;
     // The loaded list, tagged with whose it is, so a sign-out or a switch of account
@@ -56,6 +58,8 @@ export default function useTeams({ lock, notify } = {}) {
     const notifyRef = useRef(notify);
     useEffect(() => { notifyRef.current = notify; }, [notify]);
     const say = useCallback((message) => notifyRef.current?.(message), []);
+    const inRoundRef = useRef(inRound);
+    useEffect(() => { inRoundRef.current = inRound; }, [inRound]);
 
     useEffect(() => {
         if (!userId) return undefined;
@@ -88,22 +92,30 @@ export default function useTeams({ lock, notify } = {}) {
     const lockedRound = lock?.round ?? null;
 
     // Applies `change` (lineup -> lineup, or null to refuse) to one team and saves it.
+    // While a round is on, only a sub or the armband gets through.
     const edit = useCallback((teamId, change) => {
         if (!userId) return false;
         const team = latest.current.find(t => t.id === teamId);
         if (!team) return false;
-        if (locked) {
-            say(`Lineups are locked for Round ${lockedRound}`);
-            return false;
-        }
-        const next = change(lineupOf(team));
+        const before = lineupOf(team);
+        const next = change(before);
         if (!next) return false;
-        replace({ ...team, lineup: cleanLineup(next) });
-        saveLineup(teamId, next)
+        const lineup = cleanLineup(next);
+        if (locked) {
+            const why = inRoundRefusal(before, lineup, { round: lockedRound, ...inRoundRef.current });
+            if (why) {
+                say(why);
+                return false;
+            }
+        }
+        replace({ ...team, lineup });
+        saveLineup(teamId, lineup)
             .then(replace)
             .catch(e => {
                 replace(team);
-                say(e.hint === 'locked' ? 'Lineups just locked for this round' : `Couldn't save: ${e.message}`);
+                say(e.hint === 'played' ? "That player's game has started - he can only move down the lineup now"
+                    : e.hint === 'locked' ? (locked ? `No transfers while Round ${lockedRound} is on` : 'Lineups just locked for this round')
+                        : `Couldn't save: ${e.message}`);
             });
         return true;
     }, [userId, locked, lockedRound, replace, say]);

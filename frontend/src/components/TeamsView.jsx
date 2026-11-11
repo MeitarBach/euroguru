@@ -13,6 +13,8 @@ import { loadStored, storeValue } from '../columns';
 import { lineupOps, cleanLineup, EMPTY_LINEUP, TEAM_LIMIT, STARTERS, BENCH } from '../lib/teams';
 import { teamOutlook, teamRound, pricesByRound, crChange, coachExpected, pct, COACH_OUTCOMES, coachScore } from '../lib/optimizer/score';
 import { countdown, marginText } from '../lib/live/format';
+import { loadSchedule } from '../lib/live/schedule';
+import { euroleagueCode } from '../lib/live/teams';
 import LineupEditor from './teams/LineupEditor';
 import TeamCourt from './live/TeamCourt';
 import ViewSwitch from './live/ViewSwitch';
@@ -22,6 +24,7 @@ import PickerModal from './teams/PickerModal';
 // The same request the Live tab and the stats table make for every priced player.
 const ROSTER_QUERY = { season: CURRENT_SEASON, position: 'All', min_cr: 0, max_cr: 100, last_x_games: 100 };
 const BUDGET_KEY = 'euroguru.optimizerBudget';
+const SEASON_CODE = `E${CURRENT_SEASON}`;
 // Court (the half court with photos, as in the Live tab) or List, remembered per device.
 const VIEW_KEY = 'euroguru.teamsView';
 const VIEWS = [['court', 'Court'], ['list', 'List']];
@@ -37,10 +40,12 @@ const loadView = () => {
  * teamOutlook's rows in the shape TeamCourt draws (its `expected` mode): each player's
  * counted expected FPT where the Live tab has his live points. With `past`, the rows
  * are teamRound's replay of a played round: what each scored, and the coach's result.
+ * `started` holds the players whose game this round has tipped off (while it's on).
  */
-function courtGroup(outlook, lineup, past = false) {
+function courtGroup(outlook, lineup, past = false, started = NO_KEYS) {
     const rows = outlook.rows.filter(r => r.player).map(r => ({
         ...r,
+        started: started.has(r.key),
         captain: r.role === 'captain',
         benched: r.role === 'bench' || r.role === 'sixth',
         sixth: r.role === 'sixth',
@@ -66,6 +71,7 @@ function courtGroup(outlook, lineup, past = false) {
     return { rows, bench: (lineup.bench ?? []).filter(k => shown.has(k)), coachRow };
 }
 const DRAFT = 'draft';
+const NO_KEYS = new Set();
 const one = (x) => x.toFixed(1);
 
 // How a player's expected FPT is worked out (backend/utils/expected.py), remembered and
@@ -231,7 +237,8 @@ function NameInput({ initial = '', placeholder, submitLabel, onSubmit, onCancel 
  * your budget. Saved teams are the ones you watch live and bring into Watch Rooms.
  *
  * A draft works for anyone, signed in or not; saving it makes it one of your (up to 5)
- * teams. Saved teams lock with the round, as everywhere.
+ * teams. While a round is on a saved team keeps its players and coach: it can sub and
+ * move the armband, but a player whose game has started only moves down the lineup.
  */
 export default function TeamsView({ onNavigate }) {
     const { user, openAuth } = useAuth();
@@ -244,7 +251,6 @@ export default function TeamsView({ onNavigate }) {
         setToast(message);
         setTimeout(() => setToast(t => (t === message ? null : t)), 3500);
     }, []);
-    const teams = useTeams({ lock, notify: flash });
 
     const [roster, setRoster] = useState(null);
     const [coaches, setCoaches] = useState([]);
@@ -287,6 +293,39 @@ export default function TeamsView({ onNavigate }) {
     const rosterByKey = useMemo(() => new Map((roster ?? []).map(p => [p.PlayerKey, p])), [roster]);
     const coachByKey = useMemo(() => new Map(coaches.map(c => [`coach:${c.CoachID}`, c])), [coaches]);
 
+    // While a round is on: each club's first tip-off in it, so a player whose game has
+    // started can be held to moving down the lineup (the database checks the same).
+    const [tipoffs, setTipoffs] = useState(null);
+    useEffect(() => {
+        if (!lock.locked || lock.round === null) return undefined;
+        let alive = true;
+        loadSchedule(SEASON_CODE)
+            .then(games => {
+                if (!alive) return;
+                const first = new Map();
+                for (const g of games ?? []) {
+                    if (g.round !== lock.round) continue;
+                    for (const club of [g.homeCode, g.awayCode]) {
+                        if (club && !(first.get(club) <= g.tipoff)) first.set(club, g.tipoff);
+                    }
+                }
+                setTipoffs({ round: lock.round, first });
+            })
+            .catch(() => { /* the database still holds the rule */ });
+        return () => { alive = false; };
+    }, [lock.locked, lock.round]);
+    const inRound = useMemo(() => {
+        const first = lock.locked && tipoffs?.round === lock.round ? tipoffs.first : null;
+        return {
+            started: (key) => {
+                const at = first?.get(euroleagueCode(rosterByKey.get(key)));
+                return at !== undefined && at <= Date.now();
+            },
+            nameOf: (key) => rosterByKey.get(key)?.PlayerName ?? 'That player',
+        };
+    }, [lock.locked, lock.round, tipoffs, rosterByKey]);
+    const teams = useTeams({ lock, notify: flash, inRound });
+
     const [budget, setBudget] = useState(loadBudget);
     const changeBudget = (v) => {
         setBudget(v);
@@ -303,7 +342,14 @@ export default function TeamsView({ onNavigate }) {
     const team = openId === DRAFT ? null : teams.groups.find(g => g.id === openId) ?? teams.selected;
     const isDraft = !team;
     const lineup = useMemo(() => (team ? cleanLineup(team) : draft), [team, draft]);
+    // Free to change, or - a saved team while a round is on - subs and the armband only.
     const editable = isDraft || !lock.locked;
+    const subsOnly = !editable;
+    const started = useMemo(
+        () => (subsOnly ? new Set(lineup.keys.filter(k => inRound.started(k))) : NO_KEYS),
+        // `now` re-checks the clock every 30 seconds.
+        [subsOnly, lineup.keys, inRound, now], // eslint-disable-line react-hooks/exhaustive-deps
+    );
 
     const ops = useMemo(() => lineupOps(flash), [flash]);
     // An empty spot opens the player list over the page, for that spot: 'starter',
@@ -332,8 +378,8 @@ export default function TeamsView({ onNavigate }) {
         [pastRound, lineup, rosterByKey, coachByKey, roundScores, prices],
     );
     const court = useMemo(
-        () => (replay ? courtGroup(replay, lineup, true) : courtGroup(outlook, lineup)),
-        [replay, outlook, lineup],
+        () => (replay ? courtGroup(replay, lineup, true) : courtGroup(outlook, lineup, false, started)),
+        [replay, outlook, lineup, started],
     );
     const gain = replay ? crChange(replay.gain) : null;
 
@@ -445,9 +491,13 @@ export default function TeamsView({ onNavigate }) {
                         )}
                     </div>
                 )}
-                {!isDraft && lock.locked && (
-                    <span className="inline-flex items-center gap-1.5 text-xs text-amber-200">
-                        <Lock size={13} /> Locked for Round {lock.round} until {clock(lock.until)} ({countdown(lock.until - now)}) - try changes in the draft
+                {subsOnly && (
+                    <span className="inline-flex items-start gap-1.5 text-xs text-amber-200 max-w-xl">
+                        <Lock size={13} className="mt-px shrink-0" />
+                        <span>
+                            Round {lock.round} is on: no transfers until {clock(lock.until)} ({countdown(lock.until - now)}).
+                            You can still sub and move the armband - a player whose game has started can only move down.
+                        </span>
                     </span>
                 )}
             </div>
@@ -495,20 +545,22 @@ export default function TeamsView({ onNavigate }) {
                                 now={now}
                                 expected
                                 past={Boolean(replay)}
-                                editable={editable}
+                                editable={editable || subsOnly}
                                 onToggleCaptain={(key) => apply('toggleCaptain', key)}
                                 onToggleBench={(key) => apply('toggleBench', key)}
-                                onRemove={(key) => apply('remove', key)}
+                                onRemove={editable ? (key) => apply('remove', key) : undefined}
                                 onOpenPlayer={(name) => openPlayer(name, CURRENT_SEASON)}
                                 onSwap={(a, b) => apply('swap', a, b)}
-                                onAddPlayers={(role) => setPicker(role)}
-                                onPickCoach={() => setPicker('coach')}
+                                onAddPlayers={editable ? (role) => setPicker(role) : undefined}
+                                onPickCoach={editable ? () => setPicker('coach') : undefined}
                             />
                         ) : (
                             <LineupEditor
                                 outlook={replay ?? outlook}
                                 past={replay ? pastRound : null}
                                 editable={editable}
+                                subsOnly={subsOnly}
+                                started={started}
                                 onAction={apply}
                                 onPick={setPicker}
                                 onRemoveCoach={() => lineup.coach && apply('toggleCoach', lineup.coach)}

@@ -8,9 +8,10 @@ const NONE = {};
  * The lineups your teams played `round` with, by team id: { [teamId]: lineup }.
  *
  * Between rounds the Live tab keeps showing the last round, while the teams themselves
- * are open for the next one - so a team is scored on the lineup it had at that round's
- * lock, not on whatever it has been changed to since. Only asked for when `enabled`
- * (signed in, lineups unlocked); while a round is locked a team cannot have changed.
+ * are open for the next one - so a team is scored on the lineup it finished that round
+ * with (its subs included), not on whatever it has been changed to since. Only asked for
+ * when `enabled` (signed in, lineups unlocked); while a round is on, a team's current
+ * lineup is that round's lineup.
  */
 export default function usePlayedLineups(season, round, { userId, enabled }) {
     const key = enabled && userId && db && round !== null ? `${userId}:${season}:${round}` : null;

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Crown, ArrowDown, ArrowUp, X, Star, Plus } from 'lucide-react';
+import { Crown, ArrowDown, ArrowUp, X, Star, Plus, Lock } from 'lucide-react';
 import { STARTERS, BENCH } from '../../lib/teams';
 import { euroleagueCode } from '../../lib/live/teams';
 import { marginText } from '../../lib/live/format';
@@ -8,6 +8,7 @@ import CoachOdds from './CoachOdds';
 
 const ROLE_LABEL = { captain: 'Captain · x2', starter: 'x1', sixth: '6th man · x1', bench: 'Bench · x0.5' };
 const one = (x) => (x === null || x === undefined ? '–' : x.toFixed(1));
+const NO_KEYS = new Set();
 const iconBtn = 'p-1.5 rounded-md text-gray-500 hover:text-white hover:bg-white/5 disabled:opacity-30 disabled:hover:bg-transparent';
 
 function Injury({ status }) {
@@ -16,10 +17,15 @@ function Injury({ status }) {
     return <span className={`ml-1.5 text-[10px] font-semibold ${out ? 'text-red-300' : 'text-amber-300'}`}>{out ? 'OUT' : 'GTD'}</span>;
 }
 
-function PlayerLine({ row, editable, past, onAction, onOpenPlayer }) {
+/**
+ * One player and his controls. `subsOnly` (a round is on) keeps the moves and drops the
+ * x; with `started` (his game has tipped off) only the moves down are left.
+ */
+function PlayerLine({ row, editable, subsOnly, started, past, onAction, onOpenPlayer }) {
     const p = row.player;
     const change = crChange(row.delta);
     const benched = row.role === 'bench' || row.role === 'sixth';
+    const moves = editable || subsOnly;
     return (
         <div className={`flex items-center gap-2.5 px-3 py-2 rounded-lg border ${row.role === 'captain'
             ? 'border-amber-400/30 bg-amber-400/[0.05]'
@@ -43,6 +49,11 @@ function PlayerLine({ row, editable, past, onAction, onOpenPlayer }) {
                     {row.avail && row.avail[1] > 0 && row.avail[0] < row.avail[1] && (
                         <span className="whitespace-nowrap text-amber-300/80">played {row.avail[0]} of {row.avail[1]}</span>
                     )}
+                    {started && (
+                        <span className="inline-flex items-center gap-1 whitespace-nowrap text-amber-200/80" title="His game has started: he can only move down the lineup">
+                            <Lock size={10} /> game started
+                        </span>
+                    )}
                 </span>
             </button>
             <span className="text-right shrink-0">
@@ -51,24 +62,28 @@ function PlayerLine({ row, editable, past, onAction, onOpenPlayer }) {
                     {!past ? `exp ${one(row.fpt)}` : row.fpt === null ? 'DNP' : `FPT ${one(row.fpt)}`}
                 </span>
             </span>
-            {editable && (
+            {moves && (
                 <span className="flex items-center shrink-0">
-                    {!benched && (
+                    {!benched && (row.role === 'captain' || !started) && (
                         <button type="button" onClick={() => onAction('toggleCaptain', row.key)} title={row.role === 'captain' ? 'Take the armband off' : 'Make captain (x2)'} className={`${iconBtn} ${row.role === 'captain' ? '!text-amber-300' : ''}`}>
                             <Crown size={14} />
                         </button>
                     )}
-                    {row.role === 'bench' && (
+                    {row.role === 'bench' && !started && (
                         <button type="button" onClick={() => onAction('makeSixth', row.key)} title="Make sixth man (counts in full)" className={iconBtn}>
                             <Star size={14} />
                         </button>
                     )}
-                    <button type="button" onClick={() => onAction('toggleBench', row.key)} title={benched ? 'Start him' : 'Bench him'} className={iconBtn}>
-                        {benched ? <ArrowUp size={14} /> : <ArrowDown size={14} />}
-                    </button>
-                    <button type="button" onClick={() => onAction('remove', row.key)} title="Remove" className={`${iconBtn} hover:!text-red-300`}>
-                        <X size={14} />
-                    </button>
+                    {!(benched && started) && (
+                        <button type="button" onClick={() => onAction('toggleBench', row.key)} title={benched ? 'Start him' : 'Bench him'} className={iconBtn}>
+                            {benched ? <ArrowUp size={14} /> : <ArrowDown size={14} />}
+                        </button>
+                    )}
+                    {editable && (
+                        <button type="button" onClick={() => onAction('remove', row.key)} title="Remove" className={`${iconBtn} hover:!text-red-300`}>
+                            <X size={14} />
+                        </button>
+                    )}
                 </span>
             )}
         </div>
@@ -108,9 +123,11 @@ function Section({ title, note, total, children }) {
  * `outlook` is lib/optimizer/score.js's teamOutlook; `onAction(op, key)` applies one of
  * lineupOps' changes; `onPick(role)` opens the player list for a spot: 'starter',
  * 'bench' or 'coach'. With `past` (a round number) `outlook` is teamRound's replay of
- * that round instead: what each scored and how his price moved.
+ * that round instead: what each scored and how his price moved. `subsOnly` is a saved
+ * team while a round is on: moves and the armband, no transfers, and the players in
+ * `started` (a Set of keys) can only move down.
  */
-export default function LineupEditor({ outlook, editable, past = null, onAction, onPick, onRemoveCoach, onOpenPlayer }) {
+export default function LineupEditor({ outlook, editable, subsOnly = false, started = NO_KEYS, past = null, onAction, onPick, onRemoveCoach, onOpenPlayer }) {
     const starters = outlook.rows.filter(r => r.role === 'starter' || r.role === 'captain')
         .sort((a, b) => (b.role === 'captain') - (a.role === 'captain'));
     const sixth = outlook.rows.filter(r => r.role === 'sixth');
@@ -119,7 +136,18 @@ export default function LineupEditor({ outlook, editable, past = null, onAction,
     const coach = outlook.coach;
     const o = coach?.outlook;
     const game = coach?.game;
-    const line = (r) => <PlayerLine key={r.key} row={r} editable={editable} past={past !== null} onAction={onAction} onOpenPlayer={onOpenPlayer} />;
+    const line = (r) => (
+        <PlayerLine
+            key={r.key}
+            row={r}
+            editable={editable}
+            subsOnly={subsOnly && past === null}
+            started={past === null && started.has(r.key)}
+            past={past !== null}
+            onAction={onAction}
+            onOpenPlayer={onOpenPlayer}
+        />
+    );
 
     return (
         <div className="space-y-4">
