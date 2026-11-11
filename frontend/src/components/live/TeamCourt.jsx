@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Crown, X } from 'lucide-react';
+import { Plus, Crown, X, Lock } from 'lucide-react';
 import AnimatedNumber from './AnimatedNumber';
 import LiveDot from './LiveDot';
 import { GameNote } from './WatchCard';
@@ -226,6 +226,20 @@ function RemoveButton({ onClick, className = '', style }) {
     );
 }
 
+/** A lock in a player's corner while a round is on: his game has started. */
+function StartedMark({ className = '', style }) {
+    return (
+        <span
+            title="His game has started: he can only move down the lineup"
+            aria-label="Game started"
+            className={`absolute z-10 rounded-full flex items-center justify-center bg-[#0a0812]/90 border border-amber-300/40 text-amber-200 shadow-lg ${className}`}
+            style={style}
+        >
+            <Lock className="w-1/2 h-1/2" strokeWidth={2.5} />
+        </span>
+    );
+}
+
 /** A price and, when the injury report has him, OUT or GTD - for building a team. */
 function PriceLine({ row, style, className = '' }) {
     const out = row.injury && String(row.injury).toUpperCase().startsWith('OUT');
@@ -332,7 +346,8 @@ function DragGhost({ drag }) {
 /**
  * One starter on the floor: photo, name plate, points; a tap opens his details. The
  * captain wears a gold crown. With `onCaptain` / `onRemove` (an editable team) every
- * starter has a crown to tap for the armband and an x in the corner.
+ * starter has a crown to tap for the armband and an x in the corner. A player whose game
+ * has started while the round is on (`row.started`) has a lock there instead.
  */
 function Starter({ row, photo, left, top, width, narrow, tiny, now, lastEvent, onTap, onCaptain, onRemove, expected, past, dragProps, dragging, dropOver }) {
     const size = `${width}cqw`;
@@ -387,11 +402,16 @@ function Starter({ row, photo, left, top, width, narrow, tiny, now, lastEvent, o
                 </div>
             </button>
             <CaptainCrown captain={row.captain} onClick={onCaptain} />
-            {onRemove && (
+            {onRemove ? (
                 <RemoveButton
                     onClick={onRemove}
                     className={narrow ? 'right-[4%]' : 'right-[10%]'}
                     style={{ top: 'calc(var(--fig) * 0.03)', width: narrow ? '24px' : 'max(20px, 2.8cqw)', height: narrow ? '24px' : 'max(20px, 2.8cqw)' }}
+                />
+            ) : row.started && (
+                <StartedMark
+                    className={narrow ? 'right-[4%]' : 'right-[10%]'}
+                    style={{ top: 'calc(var(--fig) * 0.03)', width: narrow ? '22px' : 'max(20px, 2.6cqw)', height: narrow ? '22px' : 'max(20px, 2.6cqw)' }}
                 />
             )}
         </div>
@@ -448,10 +468,12 @@ function TileName({ pos, name, corner }) {
  * (DNP when he did not play) and how his price moved with it.
  *
  * A tap on a player opens his details. `editable` puts a crown on every starter's head
- * (tap it for the armband), an x in every player's corner (remove him) and empty spots
- * to fill (`onAddPlayers('starter' | 'bench')`); with `onSwap(a, b)` players move by
- * dragging - onto another player to swap them, between the floor and the bench, or
- * along the bench (its first is the sixth man). `photos` maps PlayerKey to a headshot
+ * (tap it for the armband), with `onRemove` an x in every player's corner (remove him),
+ * with `onAddPlayers` empty spots to fill (`onAddPlayers('starter' | 'bench')`); with
+ * `onSwap(a, b)` players move by dragging - onto another player to swap them, between
+ * the floor and the bench, or along the bench (its first is the sixth man). While a round
+ * is on, My Teams passes only the armband and the moves (subs, no transfers), and a
+ * starter whose game has started gets no crown to tap: he can't take the armband. `photos` maps PlayerKey to a headshot
  * URL and `crests` a club to its crest (the coach's tile), both from /api/headshots.
  */
 export default function TeamCourt({
@@ -526,7 +548,7 @@ export default function TeamCourt({
         if (wasDrag()) return;
         onOpenPlayer?.(row.player.PlayerName);
     };
-    const emptyBench = editable ? Math.max(0, BENCH - bench.length) : 0;
+    const emptyBench = editable && onAddPlayers ? Math.max(0, BENCH - bench.length) : 0;
 
     return (
         <div className="space-y-3">
@@ -566,11 +588,11 @@ export default function TeamCourt({
                         dragging={drag?.key === row.key}
                         dropOver={overKey === row.key && drag?.key !== row.key}
                         onTap={() => tap(row)}
-                        onCaptain={editable && onToggleCaptain ? () => onToggleCaptain(row.key) : undefined}
+                        onCaptain={editable && onToggleCaptain && (row.captain || !row.started) ? () => onToggleCaptain(row.key) : undefined}
                         onRemove={editable && onRemove ? () => onRemove(row.key) : undefined}
                     />
                 ))}
-                {editable && starters.length < STARTERS && (
+                {editable && onAddPlayers && starters.length < STARTERS && (
                     <button
                         type="button"
                         onClick={() => onAddPlayers?.('starter')}
@@ -617,9 +639,9 @@ export default function TeamCourt({
                                 {row.sixth ? '6th man · 100%' : 'Bench · 50%'}
                             </div>
                         </Tile>
-                        {editable && onRemove && (
+                        {editable && onRemove ? (
                             <RemoveButton onClick={() => onRemove(row.key)} className="top-1.5 right-1.5 w-[22px] h-[22px]" />
-                        )}
+                        ) : row.started && <StartedMark className="top-1.5 right-1.5 w-[22px] h-[22px]" />}
                     </div>
                 ))}
                 {Array.from({ length: emptyBench }, (_, i) => (
@@ -656,7 +678,7 @@ export default function TeamCourt({
                             Coach
                         </div>
                     </Tile>
-                ) : editable ? (
+                ) : editable && onPickCoach ? (
                     <Tile compact={!sixUp} dashed onClick={onPickCoach}>
                         <Plus size={16} />
                         <span className="mt-1 text-[11px]">Coach</span>

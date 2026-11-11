@@ -3,10 +3,11 @@ import { db, run } from './db';
 /**
  * Teams, round locks and profiles, stored in Supabase.
  *
- * The rules live in the database (supabase/migrations/*_teams_and_leagues.sql): row
- * security keeps a team private to its owner and a trigger refuses lineup changes while
- * a round is on. This module is the thin client for it, plus the lineup rules the UI
- * applies before asking (lineupOps). Every request throws on failure - see run().
+ * The rules live in the database (supabase/migrations/*_teams_and_leagues.sql,
+ * *_round_subs.sql): row security keeps a team private to its owner and a trigger allows
+ * only subs and the armband while a round is on. This module is the thin client for it,
+ * plus the lineup rules the UI applies before asking (lineupOps, inRoundRefusal). Every
+ * request throws on failure - see run().
  *
  * Watch Rooms, where teams are watched together, are in lib/rooms.js.
  */
@@ -112,6 +113,36 @@ export function lineupOps(say = () => {}) {
     };
 }
 
+// ------------------------------------------------------------- while a round is on
+
+// A player's place in a lineup, highest first: the captain (x2), a starter, the sixth man
+// (x1), the rest of the bench (x0.5). The database ranks them the same way
+// (public.lineup_rank, supabase/migrations/*_round_subs.sql).
+export function lineupRank(l, key) {
+    if (l.captain === key) return 3;
+    if (!l.bench.includes(key)) return 2;
+    return l.bench[0] === key ? 1 : 0;
+}
+
+const sameSet = (a, b) => a.length === b.length && a.every(k => b.includes(k));
+
+/**
+ * While a round is on, a team keeps its players and coach but can still sub and move the
+ * armband - except that a player whose game has started can only move down the lineup,
+ * never up (a benched 30-pointer can't be brought in after the fact). The database
+ * enforces the same rule; this says why before asking it.
+ *
+ * `started(key)` is whether his game has tipped off, `nameOf(key)` his name. Returns the
+ * reason `next` is refused, or null when it's allowed.
+ */
+export function inRoundRefusal(before, next, { round, started = () => false, nameOf = () => 'That player' } = {}) {
+    if (next.coach !== before.coach || !sameSet(next.keys, before.keys)) {
+        return `No transfers while Round ${round} is on - you can sub and move the armband`;
+    }
+    const moved = next.keys.find(k => lineupRank(next, k) > lineupRank(before, k) && started(k));
+    return moved ? `${nameOf(moved)}'s game has started - he can only move down the lineup now` : null;
+}
+
 // ---------------------------------------------------------------------------- teams
 
 export const listTeams = () =>
@@ -129,9 +160,9 @@ export const renameTeam = (id, name) =>
 export const deleteTeam = (id) => run(db.from('teams').delete().eq('id', id));
 
 /**
- * Your teams' lineups as they stood at one round's lock - the lineups that played it -
- * as [{ team_id, lineup }]. Saved by the database's snapshot job (team_rounds); a team
- * made after that round has none.
+ * Your teams' lineups for one round - the lineups that played it, with any subs made
+ * while it was on - as [{ team_id, lineup }]. Saved by the database at the lock and kept
+ * current through the round (team_rounds); a team made after that round has none.
  */
 export const listPlayedLineups = (season, round) =>
     run(db.from('team_rounds').select('team_id, lineup').eq('season', Number(season)).eq('round', Number(round)));
