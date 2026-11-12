@@ -6,8 +6,7 @@ Supabase.
 A team's lineup freezes at the round's first tip-off and opens again three hours after
 its last one - enough for the last game to finish. The database enforces that window
 (a trigger refuses lineup edits inside it, and a pg_cron job saves every team's lineup
-when it starts), so it needs the windows in its `rounds` table. A Watch Room's chat is open from an hour
-before each tip-off to an hour after the game, so the database also keeps every
+when it starts), so it needs the windows in its `rounds` table. It also keeps every
 game's tip-off, in `fixtures`.
 
 While a round is on, a team can still sub and move the armband, but a player whose game
@@ -84,8 +83,8 @@ def _club(text):
 
 
 def fixtures(schedule):
-    """[{season, game_code, round, tipoff, home, away}], tip-off in UTC - what the chat
-    hours and the in-round subs read. Clubs are Euroleague codes."""
+    """[{season, game_code, round, tipoff, home, away}], tip-off in UTC - what the
+    in-round subs read. Clubs are Euroleague codes."""
     df = _tipoffs(schedule)
     return [
         {"season": int(g.Season), "game_code": int(g.GameCode), "round": int(g.Round), "tipoff": g.tipoff,

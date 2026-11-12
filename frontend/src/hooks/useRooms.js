@@ -7,7 +7,7 @@ import {
 } from '../lib/rooms';
 
 // The board's scores come from the live feed in the browser; what this refreshes is
-// who is in the room, the chat hours and, at the lock, everyone's saved lineup.
+// who is in the room and, at the lock, everyone's saved lineup.
 const BOARD_REFRESH_MS = 60_000;
 
 /** A first name for a new profile: Google's given name, else the start of the full name. */

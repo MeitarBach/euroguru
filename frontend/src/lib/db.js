@@ -35,7 +35,7 @@ export const db = auth
 
 /**
  * A query's rows, or a throw with the database's message - and its `hint` (locked,
- * team_cap, room_full, bad_invite, not_found, chat_closed, too_fast, ...) and code on
+ * team_cap, room_full, bad_invite, not_found, too_fast, ...) and code on
  * the error, so the UI can say the right thing.
  */
 export async function run(query) {

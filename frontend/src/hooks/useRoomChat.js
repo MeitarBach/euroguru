@@ -13,7 +13,7 @@ const byTime = (a, b) => (a.created_at < b.created_at ? -1 : a.created_at > b.cr
  * filtered by row-level security to rooms you can read), and send / delete.
  *
  * `roomId` null means no room is open. Posting is the database's call - it refuses
- * outside the chat hours, from a non-member, or faster than one message per 2s - so
+ * a non-member, or faster than one message per 2s - so
  * `send` resolves to false and reports the reason through `notify`.
  */
 export default function useRoomChat(roomId, { notify } = {}) {

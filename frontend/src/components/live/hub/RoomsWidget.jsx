@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { Tv, Plus, Check, Link2, LogIn, MessageCircle, Compass, ChevronDown, ChevronUp } from 'lucide-react';
+import { Tv, Plus, Check, Link2, LogIn, Compass, ChevronDown, ChevronUp } from 'lucide-react';
 import SearchInput from '../../SearchInput';
-import { chatState, parseRoomCode } from '../../../lib/rooms';
-import { countdown, decimalsFor } from '../../../lib/live/format';
+import { parseRoomCode } from '../../../lib/rooms';
+import { decimalsFor } from '../../../lib/live/format';
 import { Widget, Spinner, RoomBadges, NameForm, VisibilitySwitch, softBtn, linkBtn, primaryBtn } from './ui';
 import { visibilityNote, ordinal } from './format';
 
@@ -11,19 +11,8 @@ const DISCOVER_SHOWN = 4;
 // softBtn's shape in the green of the bring dialog's "In".
 const joinedBtn = 'inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 hover:bg-emerald-500/20';
 
-/** The chat's hours as a short note: open now, or when it opens if that is today. */
-function ChatNote({ board, now }) {
-    if (!board?.chat) return null;
-    const { open, opensAt } = chatState(board.chat, now);
-    if (open) return <span className="inline-flex items-center gap-1 text-emerald-300"><MessageCircle size={11} /> chat open</span>;
-    if (opensAt && opensAt > now && opensAt - now < 24 * 3_600_000) {
-        return <span className="inline-flex items-center gap-1"><MessageCircle size={11} /> chat in {countdown(opensAt - now)}</span>;
-    }
-    return null;
-}
-
-/** One of your rooms: who leads, where you stand, whether the chat is on. */
-function MyRoomRow({ room, standing, board, now, onOpen }) {
+/** One of your rooms: who leads and where you stand. */
+function MyRoomRow({ room, standing, onOpen }) {
     const revealed = standing?.revealed;
     const best = standing?.best;
     return (
@@ -44,7 +33,6 @@ function MyRoomRow({ room, standing, board, now, onOpen }) {
                     {revealed && standing.leader
                         ? <span className="truncate">Leader <b className="text-gray-300 font-medium">{standing.leader.teamName}</b> {fixed(standing.leader.sums.total)}</span>
                         : <span>{room.teams} {room.teams === 1 ? 'team' : 'teams'} · lineups show at tip-off</span>}
-                    <ChatNote board={board} now={now} />
                 </span>
             </span>
             <span className="text-right shrink-0">
@@ -99,9 +87,9 @@ function PublicRoomRow({ room, onOpen, onJoin }) {
 /**
  * The hub's Watch Rooms: your rooms with each one's leader and your place, making a room
  * or opening an invite link, and the public rooms to discover - all on the home page.
- * `standings` and `boards` are by room id (lib/live/standings.js, useRoomBoards).
+ * `standings` is by room id (lib/live/standings.js).
  */
-export default function RoomsWidget({ rooms, standings, boards, now, onOpen, onJoin, onCreated, onSignIn, notify }) {
+export default function RoomsWidget({ rooms, standings, onOpen, onJoin, onCreated, onSignIn, notify }) {
     const [form, setForm] = useState(null); // 'create' | 'link'
     const [visibility, setVisibility] = useState('private');
     const [showAll, setShowAll] = useState(false);
@@ -111,7 +99,7 @@ export default function RoomsWidget({ rooms, standings, boards, now, onOpen, onJ
             <Widget icon={<Tv size={17} className="text-purple-300" />} title="Watch Rooms">
                 <div className="text-center py-2">
                     <p className="text-sm text-gray-400 max-w-sm mx-auto">
-                        Bring your fantasy teams into a room, see everyone's points move live, and chat while the games are on.
+                        Bring your fantasy teams into a room, see everyone's points move live, and chat about the games.
                         Join a public room or make a private one for your friends.
                     </p>
                     <button type="button" onClick={onSignIn} className={`mt-3 ${primaryBtn}`}><LogIn size={15} /> Sign in free</button>
@@ -139,7 +127,7 @@ export default function RoomsWidget({ rooms, standings, boards, now, onOpen, onJ
         <Widget
             icon={<Tv size={17} className="text-purple-300" />}
             title="Watch Rooms"
-            subtitle="Watch your teams with friends, live, with a chat during games"
+            subtitle="Watch your teams with friends, live, and chat about the games"
         >
             {rooms.status !== 'ready' ? <Spinner className="h-[100px]" /> : (
                 <div className="space-y-2">
@@ -148,8 +136,6 @@ export default function RoomsWidget({ rooms, standings, boards, now, onOpen, onJ
                             key={r.id}
                             room={r}
                             standing={standings[r.id]}
-                            board={boards[r.id]}
-                            now={now}
                             onOpen={() => onOpen(r.id)}
                         />
                     ))}

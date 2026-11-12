@@ -1,21 +1,17 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { MessageCircle, Send, Trash2, Lock } from 'lucide-react';
+import { MessageCircle, Send, Trash2 } from 'lucide-react';
 import useRoomChat from '../../hooks/useRoomChat';
-import { chatState, MESSAGE_MAX } from '../../lib/rooms';
-import { countdown } from '../../lib/live/format';
+import { MESSAGE_MAX } from '../../lib/rooms';
 
-const clock = (ms) => new Date(ms).toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' });
 const time = (iso) => new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
 
 /**
- * A Watch Room's chat. Open from an hour before a tip-off to an hour after the game
- * (the database enforces it; this only says so), read-only the rest of the time with
- * the history kept. Members post; a public room's visitors read along until they bring
- * a team. The room's admin can delete anyone's message, everyone their own.
+ * A Watch Room's chat, open any time. Members post; a public room's visitors read along
+ * until they bring a team. The room's admin can delete anyone's message, everyone their
+ * own.
  */
-export default function RoomChat({ board, userId, now, notify, onJoin }) {
+export default function RoomChat({ board, userId, notify, onJoin }) {
     const chat = useRoomChat(board.id, { notify });
-    const hours = chatState(board.chat, now);
     const canPost = board.is_member || board.is_admin;
     const [draft, setDraft] = useState('');
     const [busy, setBusy] = useState(false);
@@ -37,17 +33,10 @@ export default function RoomChat({ board, userId, now, notify, onJoin }) {
 
     return (
         <div className="glass-panel flex flex-col">
-            <div className="flex items-center justify-between gap-2 px-4 pt-3 pb-2 border-b border-white/5">
+            <div className="px-4 pt-3 pb-2 border-b border-white/5">
                 <h3 className="flex items-center gap-2 text-sm font-semibold text-white">
                     <MessageCircle size={15} className="text-purple-300" /> Chat
                 </h3>
-                <span className={`text-[11px] ${hours.open ? 'text-emerald-300' : 'text-gray-500'}`}>
-                    {hours.open
-                        ? <>Open · closes {clock(hours.closesAt)}</>
-                        : hours.opensAt
-                            ? <>Opens in {countdown(hours.opensAt - now)}</>
-                            : 'No games scheduled'}
-                </span>
             </div>
 
             <div
@@ -61,9 +50,7 @@ export default function RoomChat({ board, userId, now, notify, onJoin }) {
                 {chat.status === 'loading' && <p className="text-xs text-gray-500">Loading…</p>}
                 {chat.status === 'error' && <p className="text-xs text-gray-500">Couldn't load the chat.</p>}
                 {chat.status === 'ready' && !chat.messages.length && (
-                    <p className="text-xs text-gray-500">
-                        {hours.open ? 'Nobody has said anything yet. Go first.' : 'Quiet for now. The chat opens an hour before tip-off.'}
-                    </p>
+                    <p className="text-xs text-gray-500">Nobody has said anything yet. Go first.</p>
                 )}
                 {chat.messages.map(m => {
                     const mine = m.author === userId;
@@ -95,7 +82,7 @@ export default function RoomChat({ board, userId, now, notify, onJoin }) {
                     <button type="button" onClick={onJoin} className="w-full py-2 rounded-lg text-xs text-purple-300 hover:text-purple-200 hover:bg-purple-500/10">
                         Bring a team into this room to chat
                     </button>
-                ) : hours.open ? (
+                ) : (
                     <form onSubmit={submit} className="flex items-center gap-2">
                         <input
                             value={draft}
@@ -113,11 +100,6 @@ export default function RoomChat({ board, userId, now, notify, onJoin }) {
                             <Send size={15} />
                         </button>
                     </form>
-                ) : (
-                    <p className="flex items-center justify-center gap-1.5 py-2 text-xs text-gray-500">
-                        <Lock size={12} />
-                        {hours.opensAt ? <>Chat opens {clock(hours.opensAt)}, an hour before tip-off</> : 'Chat opens an hour before the next tip-off'}
-                    </p>
                 )}
             </div>
         </div>
