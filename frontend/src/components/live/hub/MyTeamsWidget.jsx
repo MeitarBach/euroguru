@@ -4,7 +4,7 @@ import AnimatedNumber from '../AnimatedNumber';
 import LiveDot from '../LiveDot';
 import { countdown, decimalsFor } from '../../../lib/live/format';
 import { TEAM_LIMIT, STARTERS, BENCH } from '../../../lib/teams';
-import { Widget, Spinner, Faces, softBtn, linkBtn, primaryBtn } from './ui';
+import { Widget, Spinner, linkBtn, primaryBtn } from './ui';
 import { ordinal } from './format';
 
 const clock = (ms) => new Date(ms).toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' });
@@ -57,44 +57,72 @@ export function RoomChip({ room, onOpen }) {
     );
 }
 
-function TeamCard({ group, photos, rooms, round, onOpen, onBring, onOpenRoom }) {
+/**
+ * One team as a single short row: its name and round so far, the rooms it is in with its
+ * place there, the live total - and a button to bring it into a room.
+ */
+function TeamCard({ group, rooms, round, onOpen, onBring, onOpenRoom }) {
+    const notes = [];
+    if (group.edited && round) {
+        notes.push(
+            <span key="edited" className="text-amber-200/80" title="Scored on the lineup it had at the lock; your changes count from the next round">
+                Round {round} lineup
+            </span>,
+        );
+    }
+    for (const r of rooms) {
+        notes.push(
+            <button
+                key={r.id}
+                type="button"
+                onClick={() => onOpenRoom(r.id)}
+                title={`Open ${r.name}`}
+                className="inline-flex items-center gap-1 min-w-0 max-w-full text-gray-400 hover:text-white"
+            >
+                <Tv size={11} className="text-purple-300 shrink-0" />
+                <span className="truncate max-w-[11rem]">{r.name}</span>
+                {r.revealed && r.place && (
+                    <b className={`shrink-0 font-medium ${r.place === 1 ? 'text-amber-300' : 'text-gray-200'}`}>{ordinal(r.place)} of {r.size}</b>
+                )}
+            </button>,
+        );
+    }
     return (
-        <div className="rounded-xl border border-white/10 bg-white/[0.02] hover:border-purple-400/30 transition-colors">
-            <button type="button" onClick={onOpen} className="w-full flex items-center gap-3 px-3 pt-3 pb-2 text-left">
-                <span className="min-w-0 flex-1">
-                    <span className="flex items-center gap-1.5 text-sm font-semibold text-white">
-                        <span className="truncate">{group.name}</span>
-                        <ChevronRight size={14} className="text-gray-600 shrink-0" />
-                    </span>
-                    <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-500">
-                        <RoundStatus group={group} />
-                        {group.edited && round && (
-                            <span className="text-amber-200/80" title="Scored on the lineup it had at the lock; your changes count from the next round">
-                                · Round {round} lineup
-                            </span>
-                        )}
-                    </span>
-                    <span className="mt-1.5 block"><Faces rows={group.rows} photos={photos} /></span>
-                </span>
-                <span className="text-right shrink-0">
-                    <AnimatedNumber
-                        value={group.sums.total}
-                        decimals={decimalsFor(group.sums.total)}
-                        className="block text-2xl leading-none font-bold font-mono text-white"
-                    />
-                    <span className="block mt-1 text-[10px] text-gray-500">
-                        {group.sums.toPlay > 0 && group.sums.projected !== group.sums.total ? `proj ${group.sums.projected.toFixed(1)}` : 'FPT'}
-                    </span>
+        <div className="flex items-center gap-3 px-3 py-2 rounded-xl border border-white/10 bg-white/[0.02] hover:border-purple-400/30 transition-colors">
+            <div className="min-w-0 flex-1">
+                <button type="button" onClick={onOpen} className="flex items-center gap-1 max-w-full text-sm font-semibold text-white hover:text-purple-200 text-left">
+                    <span className="truncate">{group.name}</span>
+                    <ChevronRight size={14} className="text-gray-600 shrink-0" />
+                </button>
+                <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-gray-500">
+                    <RoundStatus group={group} />
+                    {/* Each note keeps its dot, so a wrapped line never ends on one. */}
+                    {notes.map(n => (
+                        <span key={n.key} className="inline-flex items-center gap-1.5 min-w-0 max-w-full">
+                            <span className="text-gray-700">·</span>{n}
+                        </span>
+                    ))}
+                </div>
+            </div>
+            <button type="button" onClick={onOpen} className="text-right shrink-0">
+                <AnimatedNumber
+                    value={group.sums.total}
+                    decimals={decimalsFor(group.sums.total)}
+                    className="block text-xl leading-none font-bold font-mono text-white"
+                />
+                <span className="block mt-0.5 text-[10px] text-gray-500">
+                    {group.sums.toPlay > 0 && group.sums.projected !== group.sums.total ? `proj ${group.sums.projected.toFixed(1)}` : 'FPT'}
                 </span>
             </button>
-            <div className="flex flex-wrap items-center gap-1.5 px-3 pb-3">
-                {rooms.length
-                    ? rooms.map(r => <RoomChip key={r.id} room={r} onOpen={() => onOpenRoom(r.id)} />)
-                    : <span className="text-[11px] text-gray-600">Not in a Watch Room yet</span>}
-                <button type="button" onClick={onBring} className={`${softBtn} ml-auto`}>
-                    <Tv size={13} /> Bring to a room
-                </button>
-            </div>
+            <button
+                type="button"
+                onClick={onBring}
+                title="Bring to a room"
+                aria-label={`Bring ${group.name} to a room`}
+                className="inline-flex items-center gap-0.5 p-1.5 rounded-lg text-purple-200 bg-purple-500/10 border border-purple-500/25 hover:bg-purple-500/20 shrink-0"
+            >
+                <Plus size={11} /><Tv size={14} />
+            </button>
         </div>
     );
 }
@@ -135,12 +163,12 @@ function Gate({ teams, onSignIn, onMyTeams }) {
 }
 
 /**
- * The hub's My teams: each saved team's live round - total, who is playing, the starters'
- * faces - the Watch Rooms it is in with its place there, and a way to bring it into one.
+ * The hub's My teams, kept short: a row per saved team with its live total, who is
+ * playing, the Watch Rooms it is in with its place there, and a way to bring it into one.
  * `roomsOf(teamId)` lists those rooms ({id, name, place, size, revealed}).
  */
 export default function MyTeamsWidget({
-    teams, groups, photos, roomsOf, lock, now, round, onOpen, onBring, onOpenRoom, onMyTeams, onSignIn,
+    teams, groups, roomsOf, lock, now, round, onOpen, onBring, onOpenRoom, onMyTeams, onSignIn,
 }) {
     const ready = teams.signedIn && teams.status === 'ready' && groups.length > 0;
     return (
@@ -161,7 +189,6 @@ export default function MyTeamsWidget({
                         <TeamCard
                             key={g.id}
                             group={g}
-                            photos={photos}
                             rooms={roomsOf(g.id)}
                             round={round}
                             onOpen={() => onOpen(g.id)}

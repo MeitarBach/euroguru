@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
-import { Lock, Globe, BadgeCheck, X, Crown } from 'lucide-react';
-import { photoUrl } from '../../../lib/live/photos';
+import { Lock, Globe, BadgeCheck, X } from 'lucide-react';
 import { ROOM_NAME_MAX } from '../../../lib/rooms';
 
 // The Live hub's shared pieces: the widget shell, buttons, faces, and the room bits the
@@ -34,34 +33,6 @@ export function Spinner({ className = 'h-[160px]' }) {
         <div className={`w-full flex items-center justify-center ${className}`}>
             <div className="w-7 h-7 border-2 border-purple-500 border-t-transparent rounded-full animate-spin"></div>
         </div>
-    );
-}
-
-const initials = (name) => String(name ?? '?').replace(/\s*\([^)]*\)$/, '').split(/[\s.]+/).filter(Boolean)
-    .map(w => w[0]).slice(0, 2).join('').toUpperCase();
-
-/** A team's starters as a row of overlapping faces, the captain ringed in gold. */
-export function Faces({ rows, photos = {}, size = 32 }) {
-    const starters = rows.filter(r => !r.benched).slice(0, 5);
-    if (!starters.length) return null;
-    return (
-        <span className="flex items-center" style={{ paddingTop: 6 }}>
-            {starters.map((r, i) => {
-                const url = photoUrl(photos[r.key], size * 2.5);
-                return (
-                    <span
-                        key={r.key}
-                        title={r.player?.PlayerName}
-                        className={`relative rounded-full bg-violet-500/25 border-2 ${r.captain ? 'border-yellow-400' : 'border-[#121019]'}
-                            flex items-center justify-center overflow-hidden text-[10px] font-bold text-violet-200 shrink-0`}
-                        style={{ width: size, height: size, marginLeft: i ? -size * 0.28 : 0, zIndex: 5 - i }}
-                    >
-                        {url ? <img src={url} alt="" className="w-full h-full object-cover object-top" loading="lazy" /> : initials(r.player?.PlayerName)}
-                    </span>
-                );
-            })}
-            {starters.some(r => r.captain) && <Crown size={12} className="ml-1 text-yellow-400 shrink-0" fill="currentColor" />}
-        </span>
     );
 }
 
