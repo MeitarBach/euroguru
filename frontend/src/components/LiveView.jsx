@@ -621,8 +621,6 @@ export default function LiveView({ active = true, intent = null, onNavigate }) {
                                 <RoomsWidget
                                     rooms={rooms}
                                     standings={standings}
-                                    boards={boards}
-                                    now={now}
                                     onOpen={(id) => go({ kind: 'room', id })}
                                     onJoin={(room) => setBring({ room })}
                                     onCreated={(id) => { refreshRooms(); go({ kind: 'room', id }); }}

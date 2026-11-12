@@ -292,7 +292,7 @@ export default function RoomView({
                         )}
                     </div>
                     <div className={tab === 'chat' ? '' : 'hidden xl:block'}>
-                        <RoomChat key={board.id} board={board} userId={userId} now={now} notify={flash} onJoin={onBring} />
+                        <RoomChat key={board.id} board={board} userId={userId} notify={flash} onJoin={onBring} />
                     </div>
                     <div className="hidden xl:block">
                         <ActivityFeed events={events} nameOf={nameOf} groupsOf={groupsOf} />

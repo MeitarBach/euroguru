@@ -10,7 +10,7 @@ const REFRESH_MS = 60_000;
  * room_board for each of `roomIds` (your rooms), refreshed every minute while `active`:
  * { [roomId]: board }. A board that fails to load is left out; the room still lists.
  * The scores themselves come from the live feed, as everywhere - this is who is in each
- * room, the chat hours and, at the lock, everyone's saved lineup.
+ * room and, at the lock, everyone's saved lineup.
  */
 export default function useRoomBoards(roomIds, { active = true, version = 0 } = {}) {
     const ids = useMemo(() => roomIds.slice(0, MAX_BOARDS), [roomIds]);

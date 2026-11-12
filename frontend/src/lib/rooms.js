@@ -3,11 +3,11 @@ import { auth } from './auth';
 
 /**
  * Watch Rooms: where people bring their teams to watch the round together, live, and
- * chat while the games are on. Not a competition - a room shows only the round being
+ * chat about the games. Not a competition - a room shows only the round being
  * played. See supabase/migrations/*_watch_rooms.sql for the rules:
  *   - public rooms are open to anyone signed in; private ones need the invite link;
  *   - rivals' lineups show from the round's first tip-off (as saved at the lock);
- *   - the chat is open from an hour before a tip-off to an hour after the game;
+ *   - members can chat any time, one message per 2 seconds;
  *   - a room stays until its admin closes it, which deletes it and its chat.
  */
 
@@ -30,7 +30,7 @@ export const updateRoom = (id, fields) =>
 /** Closing a room deletes it for everyone, with its chat. Teams are kept. */
 export const closeRoom = (id) => run(db.from('rooms').delete().eq('id', id));
 
-/** The room's board for the latest round that has started, plus its chat hours. */
+/** The room's board for the latest round that has started. */
 export const roomBoard = (id) => run(db.rpc('room_board', { rid: id }));
 
 /** What a private room's invite shows before joining, or null for a dead link. */
@@ -62,14 +62,6 @@ export async function listMessages(roomId, limit = 100) {
 export const postMessage = (roomId, body) => run(db.rpc('post_message', { rid: roomId, body }));
 
 export const deleteMessage = (id) => run(db.from('room_messages').delete().eq('id', id));
-
-/** Whether the chat is open at `now` (ms), from room_board's `chat` window. */
-export function chatState(chat, now) {
-    if (!chat) return { open: false, opensAt: null, closesAt: null };
-    const opensAt = Date.parse(chat.opens_at);
-    const closesAt = Date.parse(chat.closes_at);
-    return { open: now >= opensAt && now < closesAt, opensAt, closesAt };
-}
 
 // ------------------------------------------------------------------------- realtime
 

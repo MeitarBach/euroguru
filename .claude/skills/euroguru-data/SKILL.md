@@ -76,12 +76,12 @@ python promote.py --yes
   `--allow-shrink` or `--skip-checks` unless the user asks for it.
 - "prod is already up to date" is a fine outcome - nothing to copy.
 
-## 4b. Round locks and chat hours (after a promote)
+## 4b. Round locks and fixtures (after a promote)
 Teams' lineups lock per round in Supabase (`public.rounds`, see
-`supabase/migrations/*_teams_and_leagues.sql`), a Watch Room's chat opens an hour
-before each tip-off (`public.fixtures`, see `*_watch_rooms.sql`), and during a round a
-player whose game has started can only move down a lineup - which needs each fixture's
-clubs and each player's club (`public.player_clubs`, see `*_round_subs.sql`). After a
+`supabase/migrations/*_teams_and_leagues.sql`), and during a round a player whose game
+has started can only move down a lineup - which needs each game's tip-off and clubs
+(`public.fixtures`, see `*_watch_rooms.sql`) and each player's club
+(`public.player_clubs`, see `*_round_subs.sql`). After a
 promote, refresh all three - a postponed game or a transfer moves them:
 ```bash
 python -m utils.rounds 2026 > /tmp/rounds.sql   # from backend/, with the environment
