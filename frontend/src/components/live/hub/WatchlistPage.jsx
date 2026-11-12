@@ -100,16 +100,19 @@ function CoachSlot({ group, coaches, games, history, lastEvent, now, onPick }) {
 
 /**
  * One watchlist, live: any players you follow (no account needed), arranged like a team -
- * starters, a captain, the bench and a coach - with its plays beside it.
+ * starters, a captain, the bench and a coach - with all your watchlists and its plays
+ * beside it. `board` is the watchlists' scoreboard (GroupBoard), this one selected: on a
+ * phone it leads the page, on a wide screen it moves to the side.
  */
 export default function WatchlistPage({
-    group, watch, canDelete, coaches, games, history, lastEvent, now, suggestions, feed, nameOf, groupsOf,
+    group, watch, canDelete, coaches, games, history, lastEvent, now, suggestions, feed, nameOf, groupsOf, board,
     onAddPlayers, onShare, onDeleted, onOpenPlayer,
 }) {
     const keys = new Set([...group.keys, group.coach].filter(Boolean));
     const events = feed.filter(e => keys.has(e.key));
     return (
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-5 items-start">
+            {board && <div className="xl:hidden">{board}</div>}
             <section className="xl:col-span-2 space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="min-w-0 flex-1">
@@ -177,6 +180,7 @@ export default function WatchlistPage({
                 />
             </section>
             <aside className="space-y-4">
+                {board && <div className="hidden xl:block">{board}</div>}
                 <ActivityFeed title={group.name} events={events} nameOf={nameOf} groupsOf={groupsOf} />
             </aside>
         </div>

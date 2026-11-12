@@ -416,6 +416,19 @@ export default function LiveView({ active = true, intent = null, onNavigate }) {
         lists: lists.groups.map(g => ({ id: g.id, name: g.name })),
     };
 
+    // Every watchlist's total, ranked live - on the home, and beside an open watchlist
+    // (`selectedId`) to switch between them. A new one is empty, so it opens the picker.
+    const listBoard = (selectedId) => (
+        <GroupBoard
+            round={live.round}
+            groups={listGroups}
+            selectedId={selectedId}
+            onSelect={(id) => go({ kind: 'list', id })}
+            onCreate={(name) => { const id = lists.create(name); go({ kind: 'list', id }); setPicker({ open: true, game: null }); }}
+            noun="watchlists"
+        />
+    );
+
     return (
         <div className="space-y-5">
             {demo && (
@@ -598,26 +611,14 @@ export default function LiveView({ active = true, intent = null, onNavigate }) {
                             onShare={() => shareGroup(list, live.round).then(flash)}
                             onDeleted={goHome}
                             onOpenPlayer={openPlayerNow}
+                            board={listBoard(list.id)}
                         />
                     ) : (
-                        // The home: your teams and the Watch Rooms on the left, the
-                        // watchlists and the plays on the right; on a phone in that order.
+                        // The home leads with the live scores: the Watch Rooms, then the
+                        // watchlists. Your teams and the plays are on the side on a wide
+                        // screen, and last on a phone.
                         <div className="grid grid-cols-1 xl:grid-cols-5 gap-5 items-start">
                             <div className="xl:col-span-3 space-y-5">
-                                <MyTeamsWidget
-                                    teams={teams}
-                                    groups={teamGroups}
-                                    photos={headshots.players}
-                                    roomsOf={roomsOf}
-                                    lock={lock}
-                                    now={now}
-                                    round={live.round}
-                                    onOpen={(id) => go({ kind: 'team', id })}
-                                    onBring={(id) => setBring({ teamId: id })}
-                                    onOpenRoom={(id) => go({ kind: 'room', id })}
-                                    onMyTeams={toMyTeams}
-                                    onSignIn={() => openAuth('Save your fantasy teams')}
-                                />
                                 <RoomsWidget
                                     rooms={rooms}
                                     standings={standings}
@@ -627,15 +628,21 @@ export default function LiveView({ active = true, intent = null, onNavigate }) {
                                     onSignIn={() => openAuth('Watch the round with friends')}
                                     notify={flash}
                                 />
+                                {listBoard(null)}
                             </div>
                             <div className="xl:col-span-2 space-y-5">
-                                <GroupBoard
+                                <MyTeamsWidget
+                                    teams={teams}
+                                    groups={teamGroups}
+                                    roomsOf={roomsOf}
+                                    lock={lock}
+                                    now={now}
                                     round={live.round}
-                                    groups={listGroups}
-                                    selectedId={null}
-                                    onSelect={(id) => go({ kind: 'list', id })}
-                                    onCreate={(name) => { const id = lists.create(name); go({ kind: 'list', id }); setPicker({ open: true, game: null }); }}
-                                    noun="watchlists"
+                                    onOpen={(id) => go({ kind: 'team', id })}
+                                    onBring={(id) => setBring({ teamId: id })}
+                                    onOpenRoom={(id) => go({ kind: 'room', id })}
+                                    onMyTeams={toMyTeams}
+                                    onSignIn={() => openAuth('Save your fantasy teams')}
                                 />
                                 <ActivityFeed events={feed} nameOf={nameOf} groupsOf={groupsOf} />
                             </div>
