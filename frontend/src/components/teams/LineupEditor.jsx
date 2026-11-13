@@ -5,6 +5,8 @@ import { euroleagueCode } from '../../lib/live/teams';
 import { marginText } from '../../lib/live/format';
 import { crChange, coachExpected, coachScore, pct } from '../../lib/optimizer/score';
 import CoachOdds from './CoachOdds';
+import LiveDot from '../live/LiveDot';
+import { GameNote } from '../live/WatchCard';
 
 const ROLE_LABEL = { captain: 'Captain · x2', starter: 'x1', sixth: '6th man · x1', bench: 'Bench · x0.5' };
 const one = (x) => (x === null || x === undefined ? '–' : x.toFixed(1));
@@ -19,9 +21,10 @@ function Injury({ status }) {
 
 /**
  * One player and his controls. `subsOnly` (a round is on) keeps the moves and drops the
- * x; with `started` (his game has tipped off) only the moves down are left.
+ * x; with `started` (his game has tipped off) only the moves down are left. With `live`
+ * his number is what he has scored so far this round, or when his game is.
  */
-function PlayerLine({ row, editable, subsOnly, started, past, onAction, onOpenPlayer }) {
+function PlayerLine({ row, editable, subsOnly, started, past, live, now, onAction, onOpenPlayer }) {
     const p = row.player;
     const change = crChange(row.delta);
     const benched = row.role === 'bench' || row.role === 'sixth';
@@ -56,12 +59,22 @@ function PlayerLine({ row, editable, subsOnly, started, past, onAction, onOpenPl
                     )}
                 </span>
             </button>
-            <span className="text-right shrink-0">
-                <span className="block font-mono text-sm text-white tabular-nums">{one(row.counted)}</span>
-                <span className="block text-[10px] text-gray-600 tabular-nums">
-                    {!past ? `exp ${one(row.fpt)}` : row.fpt === null ? 'DNP' : `FPT ${one(row.fpt)}`}
+            {live ? (
+                <span className="text-right shrink-0">
+                    <span className="block font-mono text-sm text-white tabular-nums">{row.score === null ? '–' : one(row.counted)}</span>
+                    <span className="flex items-center justify-end gap-1 text-[10px] text-gray-600 tabular-nums whitespace-nowrap">
+                        {row.state === 'live' && <LiveDot />}
+                        {row.score === null ? <GameNote row={row} now={now} /> : `FPT ${one(row.score)}`}
+                    </span>
                 </span>
-            </span>
+            ) : (
+                <span className="text-right shrink-0">
+                    <span className="block font-mono text-sm text-white tabular-nums">{one(row.counted)}</span>
+                    <span className="block text-[10px] text-gray-600 tabular-nums">
+                        {!past ? `exp ${one(row.fpt)}` : row.fpt === null ? 'DNP' : `FPT ${one(row.fpt)}`}
+                    </span>
+                </span>
+            )}
             {moves && (
                 <span className="flex items-center shrink-0">
                     {!benched && (row.role === 'captain' || !started) && (
@@ -125,9 +138,11 @@ function Section({ title, note, total, children }) {
  * 'bench' or 'coach'. With `past` (a round number) `outlook` is teamRound's replay of
  * that round instead: what each scored and how his price moved. `subsOnly` is a saved
  * team while a round is on: moves and the armband, no transfers, and the players in
- * `started` (a Set of keys) can only move down.
+ * `started` (a Set of keys) can only move down. With `live` the rows are the round on
+ * now, as it stands: each player's live score (lib/live/rows.js), and the coach's live
+ * row in `outlook.coach.live`; `now` times the games still to come.
  */
-export default function LineupEditor({ outlook, editable, subsOnly = false, started = NO_KEYS, past = null, onAction, onPick, onRemoveCoach, onOpenPlayer }) {
+export default function LineupEditor({ outlook, editable, subsOnly = false, started = NO_KEYS, past = null, live = false, now, onAction, onPick, onRemoveCoach, onOpenPlayer }) {
     const starters = outlook.rows.filter(r => r.role === 'starter' || r.role === 'captain')
         .sort((a, b) => (b.role === 'captain') - (a.role === 'captain'));
     const sixth = outlook.rows.filter(r => r.role === 'sixth');
@@ -136,6 +151,7 @@ export default function LineupEditor({ outlook, editable, subsOnly = false, star
     const coach = outlook.coach;
     const o = coach?.outlook;
     const game = coach?.game;
+    const lc = coach?.live ?? null;
     const line = (r) => (
         <PlayerLine
             key={r.key}
@@ -144,6 +160,8 @@ export default function LineupEditor({ outlook, editable, subsOnly = false, star
             subsOnly={subsOnly && past === null}
             started={past === null && started.has(r.key)}
             past={past !== null}
+            live={live}
+            now={now}
             onAction={onAction}
             onOpenPlayer={onOpenPlayer}
         />
@@ -170,7 +188,11 @@ export default function LineupEditor({ outlook, editable, subsOnly = false, star
                 ))}
             </Section>
 
-            <Section title="Coach" note="scores his club's margin - counted at his most likely score" total={past !== null ? coach?.points : o ? coachExpected(o) : undefined}>
+            <Section
+                title="Coach"
+                note={live ? "scores his club's margin" : "scores his club's margin - counted at his most likely score"}
+                total={live ? lc?.counted ?? undefined : past !== null ? coach?.points : o ? coachExpected(o) : undefined}
+            >
                 {coach ? (
                     <div className="px-3 py-2 rounded-lg border border-violet-500/25 bg-violet-500/[0.04]">
                         <div className="flex items-center gap-2.5">
@@ -180,18 +202,24 @@ export default function LineupEditor({ outlook, editable, subsOnly = false, star
                                 <span className="flex flex-wrap gap-x-2 text-[11px] text-gray-500">
                                     <span className="whitespace-nowrap">{coach.coach?.TeamCode ?? ''} · {one(coach.coach?.CR)} CR</span>
                                     <span className="whitespace-nowrap">
-                                        {past !== null
-                                            ? (game ? <>{marginText(game.margin, true)} {game.home ? 'vs' : '@'} {game.opp}</> : 'no game')
-                                            : o?.opp ? <>{o.home ? 'vs' : '@'} {o.opp} · {pct(o.win)} to win</> : 'no game'}
+                                        {live
+                                            ? (lc && lc.counted !== null
+                                                ? <>{marginText(lc.margin, lc.state === 'final')} {lc.home ? 'vs' : '@'} {lc.opp}</>
+                                                : lc ? <GameNote row={lc} now={now} /> : 'no game')
+                                            : past !== null
+                                                ? (game ? <>{marginText(game.margin, true)} {game.home ? 'vs' : '@'} {game.opp}</> : 'no game')
+                                                : o?.opp ? <>{o.home ? 'vs' : '@'} {o.opp} · {pct(o.win)} to win</> : 'no game'}
                                     </span>
                                 </span>
                             </span>
                             <span className="text-right shrink-0">
                                 <span className="block font-mono text-sm text-white tabular-nums">
-                                    {past !== null ? one(coach.points) : coachScore(coachExpected(o))}
+                                    {live ? one(lc?.counted) : past !== null ? one(coach.points) : coachScore(coachExpected(o))}
                                 </span>
-                                <span className="block text-[10px] text-gray-600">
-                                    {past !== null ? `Round ${past}` : o?.opp ? `most likely · ${pct(o.chance)}` : 'expected'}
+                                <span className="flex items-center justify-end gap-1 text-[10px] text-gray-600">
+                                    {live
+                                        ? <>{lc?.state === 'live' && <LiveDot />}{lc?.state === 'live' ? 'live' : lc?.state === 'final' ? 'final' : 'to play'}</>
+                                        : past !== null ? `Round ${past}` : o?.opp ? `most likely · ${pct(o.chance)}` : 'expected'}
                                 </span>
                             </span>
                             {editable && (
@@ -206,7 +234,7 @@ export default function LineupEditor({ outlook, editable, subsOnly = false, star
                             )}
                         </div>
                         {/* Under the name (the badge's width + the gap in): six chips need the row's width on a phone. */}
-                        {past === null && <CoachOdds outlook={o} className="mt-1.5 pl-[34px]" />}
+                        {past === null && !live && <CoachOdds outlook={o} className="mt-1.5 pl-[34px]" />}
                     </div>
                 ) : (
                     <Slot label="Pick a coach" editable={editable} onClick={() => onPick('coach')} />
