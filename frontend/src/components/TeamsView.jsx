@@ -4,6 +4,8 @@ import { fetchStats, fetchCoaches, fetchExpected, fetchHeadshots, fetchRoundScor
 import { CURRENT_SEASON } from '../seasons';
 import useTeams from '../hooks/useTeams';
 import useRoundLock from '../hooks/useRoundLock';
+import useLiveRound from '../hooks/useLiveRound';
+import { DEV_UNLOCK } from '../lib/db';
 import useNow from '../hooks/useNow';
 import { useAuth } from '../hooks/authContext';
 import { useOpenPlayer } from '../hooks/playerDetailContext';
@@ -14,6 +16,8 @@ import { lineupOps, cleanLineup, EMPTY_LINEUP, TEAM_LIMIT, STARTERS, BENCH } fro
 import { teamOutlook, teamRound, pricesByRound, crChange, coachExpected, pct, COACH_OUTCOMES, coachScore } from '../lib/optimizer/score';
 import { countdown, marginText } from '../lib/live/format';
 import { loadSchedule } from '../lib/live/schedule';
+import { euroleagueSource } from '../lib/live/source';
+import { watchRow, coachRow as liveCoachRow, inGroup, totals } from '../lib/live/rows';
 import { euroleagueCode } from '../lib/live/teams';
 import LineupEditor from './teams/LineupEditor';
 import TeamCourt from './live/TeamCourt';
@@ -72,6 +76,11 @@ function courtGroup(outlook, lineup, past = false, started = NO_KEYS) {
 }
 const DRAFT = 'draft';
 const NO_KEYS = new Set();
+const NO_LIST = [];
+// While a round is on, the lineup is scored live from Euroleague's feed, as in the Live
+// tab. Outside one the loop gets a source with no games, so it never asks for anything.
+const LIVE_SOURCE = euroleagueSource(SEASON_CODE);
+const IDLE_SOURCE = { kind: 'idle', pollMs: 60_000, schedule: async () => [], header: async () => null, boxscore: async () => null };
 const one = (x) => x.toFixed(1);
 
 // How a player's expected FPT is worked out (backend/utils/expected.py), remembered and
@@ -162,8 +171,11 @@ function Stat({ label, children, tone = '' }) {
     );
 }
 
-/** What the team scores and costs, against the budget you entered. */
-function Summary({ outlook, budget, onBudget, round, children }) {
+/**
+ * What the team scores and costs, against the budget you entered. With `live`
+ * ({ round, sums }) the score is the round on now, so far, instead of the expected.
+ */
+function Summary({ outlook, budget, onBudget, round, live, children }) {
     const cap = budget === '' ? null : Number(budget);
     const over = cap !== null && outlook.cost > cap;
     const pct = cap ? Math.min(100, (outlook.cost / cap) * 100) : 0;
@@ -172,9 +184,15 @@ function Summary({ outlook, budget, onBudget, round, children }) {
         <div className="glass-panel p-4 space-y-3">
             {children}
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                <Stat label={round ? `Expected · Round ${round}` : 'Expected'} tone="text-white">
-                    {one(outlook.expected)} <span className="text-sm font-medium text-gray-500">FPT</span>
-                </Stat>
+                {live ? (
+                    <Stat label={`Round ${live.round} · so far`} tone="text-white">
+                        {one(live.sums.total)} <span className="text-sm font-medium text-gray-500">FPT</span>
+                    </Stat>
+                ) : (
+                    <Stat label={round ? `Expected · Round ${round}` : 'Expected'} tone="text-white">
+                        {one(outlook.expected)} <span className="text-sm font-medium text-gray-500">FPT</span>
+                    </Stat>
+                )}
                 <Stat label="Budget used" tone={over ? 'text-red-300' : 'text-white'}>
                     {one(outlook.cost)}{cap !== null && <span className="text-sm font-medium text-gray-500"> / {one(cap)}</span>} <span className="text-sm font-medium text-gray-500">CR</span>
                 </Stat>
@@ -239,12 +257,21 @@ function NameInput({ initial = '', placeholder, submitLabel, onSubmit, onCancel 
  * A draft works for anyone, signed in or not; saving it makes it one of your (up to 5)
  * teams. While a round is on a saved team keeps its players and coach: it can sub and
  * move the armband, but a player whose game has started only moves down the lineup.
+ * And while it is on, the lineup shows what each player has really scored so far - live,
+ * as the Live tab counts it - rather than what he is expected to score.
  */
 export default function TeamsView({ onNavigate }) {
     const { user, openAuth } = useAuth();
     const openPlayer = useOpenPlayer();
     const now = useNow(30_000);
-    const lock = useRoundLock(CURRENT_SEASON, now);
+    const roundLock = useRoundLock(CURRENT_SEASON, now);
+    // On the dev server with a key (lib/db.js) the round lock is lifted for your teams:
+    // the database lets the changes through, so the page treats the round as open.
+    const devLifted = DEV_UNLOCK && roundLock.locked;
+    const lock = useMemo(
+        () => (devLifted ? { ...roundLock, locked: false, round: null, until: null } : roundLock),
+        [devLifted, roundLock],
+    );
     const [toast, setToast] = useState(null);
     const flash = useCallback((message) => {
         if (!message) return;
@@ -256,11 +283,12 @@ export default function TeamsView({ onNavigate }) {
     const [coaches, setCoaches] = useState([]);
     const [expected, setExpected] = useState({ round: null, players: {}, coaches: {} });
     const [headshots, setHeadshots] = useState({ players: {}, names: {}, crests: {} });
-    // The Round dropdown: 'next' (what the team is expected to score) or a played round,
-    // replayed with the roster as it is now.
+    // The Round dropdown: 'live' (the round on now, as it stands), 'next' (what the team
+    // is expected to score) or a played round, replayed with the roster as it is now.
+    // Until one is picked: live while a round is on, else expected.
     const [roundScores, setRoundScores] = useState({ rounds: [], players: {}, clubs: {} });
     const [crHistory, setCrHistory] = useState(null);
-    const [shownRound, setShownRound] = useState('next');
+    const [shownRound, setShownRound] = useState(null);
     const [view, setView] = useState(loadView);
     const changeView = (next) => {
         setView(next);
@@ -351,6 +379,35 @@ export default function TeamsView({ onNavigate }) {
         [subsOnly, lineup.keys, inRound, now], // eslint-disable-line react-hooks/exhaustive-deps
     );
 
+    // While a round is on (whatever the dev key lifts): the lineup's players and coach,
+    // live - each on what he has scored so far in his role, the way the Live tab and the
+    // Watch Rooms count him.
+    const liveOn = roundLock.locked;
+    const liveCoach = lineup.coach ? coachByKey.get(lineup.coach) ?? null : null;
+    const liveCoaches = useMemo(
+        () => (liveOn && liveCoach ? [{ key: lineup.coach, code: liveCoach.TeamCode, name: liveCoach.CoachName }] : NO_LIST),
+        [liveOn, liveCoach, lineup.coach],
+    );
+    const live = useLiveRound({
+        source: liveOn ? LIVE_SOURCE : IDLE_SOURCE,
+        // Its own journal in the session, apart from the Live tab's.
+        seasonCode: `${SEASON_CODE}-teams`,
+        roster,
+        watchKeys: liveOn ? lineup.keys : NO_LIST,
+        watchCoaches: liveCoaches,
+    });
+    const liveGroup = useMemo(() => {
+        if (!liveOn || live.round === null || live.round !== roundLock.round) return null;
+        const bench = new Set(lineup.bench);
+        const roleOf = (key) => (lineup.captain === key ? 'captain'
+            : lineup.bench[0] === key ? 'sixth' : bench.has(key) ? 'bench' : 'starter');
+        const rows = lineup.keys.map(k => rosterByKey.get(k)).filter(Boolean)
+            .map(p => ({ ...inGroup(watchRow(p, live.games), roleOf(p.PlayerKey)), started: started.has(p.PlayerKey) }));
+        const coach = liveCoach ? inGroup(liveCoachRow(liveCoach, live.games)) : null;
+        const placed = new Set(rows.map(r => r.key));
+        return { rows, bench: lineup.bench.filter(k => placed.has(k)), coachRow: coach, sums: totals(rows, coach) };
+    }, [liveOn, live.round, live.games, roundLock.round, lineup, rosterByKey, liveCoach, started]);
+
     const ops = useMemo(() => lineupOps(flash), [flash]);
     // An empty spot opens the player list over the page, for that spot: 'starter',
     // 'bench' or 'coach'.
@@ -371,15 +428,22 @@ export default function TeamsView({ onNavigate }) {
     );
     const remaining = budget === '' ? null : Number(budget) - outlook.cost;
     const prices = useMemo(() => pricesByRound(crHistory), [crHistory]);
-    const pastRound = shownRound === 'next' ? null : Number(shownRound);
+    const shown = shownRound === 'live' && !liveGroup ? 'next' : shownRound ?? (liveGroup ? 'live' : 'next');
+    const pastRound = shown === 'next' || shown === 'live' ? null : Number(shown);
+    const liveView = shown === 'live' ? liveGroup : null;
+    // The same, in the shape the list draws (teamOutlook's rows, with the live fields).
+    const liveOutlook = useMemo(() => liveView && {
+        rows: liveView.rows.map(r => ({ ...r, fpt: r.score, counted: r.counted ?? 0 })),
+        coach: lineup.coach ? { key: lineup.coach, coach: liveCoach, cr: liveCoach?.CR ?? 0, live: liveView.coachRow } : null,
+    }, [liveView, lineup.coach, liveCoach]);
     const replay = useMemo(
         () => (pastRound === null ? null
             : teamRound(lineup, { rosterByKey, coachByKey, scores: roundScores, prices, round: pastRound })),
         [pastRound, lineup, rosterByKey, coachByKey, roundScores, prices],
     );
     const court = useMemo(
-        () => (replay ? courtGroup(replay, lineup, true) : courtGroup(outlook, lineup, false, started)),
-        [replay, outlook, lineup, started],
+        () => (replay ? courtGroup(replay, lineup, true) : liveView ?? courtGroup(outlook, lineup, false, started)),
+        [replay, liveView, outlook, lineup, started],
     );
     const gain = replay ? crChange(replay.gain) : null;
 
@@ -491,6 +555,15 @@ export default function TeamsView({ onNavigate }) {
                         )}
                     </div>
                 )}
+                {devLifted && (
+                    <span className="inline-flex items-start gap-1.5 text-xs text-sky-200 max-w-xl">
+                        <Info size={13} className="mt-px shrink-0" />
+                        <span>
+                            Dev server: Round {roundLock.round}'s lock is lifted for your teams. Changes count
+                            for this round, as subs do.
+                        </span>
+                    </span>
+                )}
                 {subsOnly && (
                     <span className="inline-flex items-start gap-1.5 text-xs text-amber-200 max-w-xl">
                         <Lock size={13} className="mt-px shrink-0" />
@@ -509,21 +582,32 @@ export default function TeamsView({ onNavigate }) {
             ) : (
                 <div className="grid grid-cols-1 xl:grid-cols-5 gap-5 items-start">
                     <section className="xl:col-span-3 space-y-4">
-                        <Summary outlook={outlook} budget={budget} onBudget={changeBudget} round={expected.round}>
+                        <Summary outlook={outlook} budget={budget} onBudget={changeBudget} round={expected.round} live={liveView ? { round: roundLock.round, sums: liveView.sums } : null}>
                             <MethodSwitch method={method} onChange={changeMethod} rec={rec} onSettings={() => onNavigate?.('recs', { advanced: true })} />
                         </Summary>
-                        {/* The round shown: next round's expected numbers, or a played one
-                            replayed with this roster. On a phone the result drops below. */}
+                        {/* The round shown: the one on now (live), next round's expected numbers,
+                            or a played one replayed with this roster. On a phone the result drops below. */}
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
                             <select
-                                value={shownRound}
+                                value={shown}
                                 onChange={(e) => setShownRound(e.target.value)}
                                 aria-label="Round"
                                 className="input-dark py-1 text-xs"
                             >
+                                {liveGroup && <option value="live">Round {roundLock.round} · live</option>}
                                 <option value="next">{expected.round ? `Round ${expected.round} · expected` : 'Next round · expected'}</option>
-                                {[...roundScores.rounds].reverse().map(r => <option key={r} value={r}>Round {r}</option>)}
+                                {[...roundScores.rounds].reverse()
+                                    .filter(r => !(liveGroup && r === roundLock.round))
+                                    .map(r => <option key={r} value={r}>Round {r}</option>)}
                             </select>
+                            {liveView && (
+                                <span className="order-last w-full sm:order-none sm:w-auto text-sm text-gray-400 whitespace-nowrap">
+                                    {liveView.sums.live > 0 && <><b className="text-red-300">{liveView.sums.live} live</b><span className="mx-1.5 text-gray-600">·</span></>}
+                                    {liveView.sums.toPlay} to play
+                                    <span className="mx-1.5 text-gray-600">·</span>
+                                    <span title="So far, plus the season average of everyone still to play">proj <b className="font-mono text-white">{one(liveView.sums.projected)}</b></span>
+                                </span>
+                            )}
                             {replay && (
                                 <span className="order-last w-full sm:order-none sm:w-auto text-sm text-gray-400 whitespace-nowrap">
                                     <b className="font-mono text-white">{one(replay.scored)}</b> FPT
@@ -543,7 +627,7 @@ export default function TeamsView({ onNavigate }) {
                                 photos={headshots.players}
                                 crests={headshots.crests}
                                 now={now}
-                                expected
+                                expected={!liveView}
                                 past={Boolean(replay)}
                                 editable={editable || subsOnly}
                                 onToggleCaptain={(key) => apply('toggleCaptain', key)}
@@ -556,8 +640,10 @@ export default function TeamsView({ onNavigate }) {
                             />
                         ) : (
                             <LineupEditor
-                                outlook={replay ?? outlook}
+                                outlook={replay ?? liveOutlook ?? outlook}
                                 past={replay ? pastRound : null}
+                                live={Boolean(liveOutlook)}
+                                now={now}
                                 editable={editable}
                                 subsOnly={subsOnly}
                                 started={started}

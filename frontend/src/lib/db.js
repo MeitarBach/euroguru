@@ -4,6 +4,12 @@ import { auth } from './auth';
 const url = import.meta.env.VITE_SUPABASE_URL;
 const key = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
+// The dev server only: a key that lifts the round lock, so your teams can change while a
+// round is on (supabase/migrations/*_dev_unlock.sql). It lives in
+// frontend/.env.development.local, which `vite` reads in dev and never in a build.
+const devUnlock = import.meta.env.DEV ? import.meta.env.VITE_DEV_UNLOCK : undefined;
+export const DEV_UNLOCK = Boolean(devUnlock);
+
 /**
  * Every request carries the signed-in user's access token, which is what row-level
  * security keys on: the tables only ever answer with the caller's own rows.
@@ -16,6 +22,7 @@ const authedFetch = async (input, init = {}) => {
     const { data } = await auth.getSession();
     const headers = new Headers(init.headers);
     headers.set('Authorization', `Bearer ${data?.session?.access_token ?? key}`);
+    if (devUnlock) headers.set('x-euroguru-unlock', devUnlock);
     return fetch(input, { ...init, headers });
 };
 
