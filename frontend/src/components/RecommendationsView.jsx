@@ -11,6 +11,7 @@ import ColumnPicker from './ColumnPicker';
 import { SEASONS, CURRENT_SEASON } from '../seasons';
 import InfoTip from './InfoTip';
 import { shortName, columnKey, columnLabel, columnInfo, formatCell } from '../columns';
+import InjuryBadge from './InjuryBadge';
 import {
     REC_COLUMNS, REC_COLUMN_CATEGORIES, REC_DEFAULT_IDS,
     loadRecColumns, storeRecColumns, loadRecWeights, storeRecWeights, REC_DEFAULT_WEIGHTS,
@@ -525,6 +526,12 @@ export default function RecommendationsView({ openAdvanced = false }) {
                                                         return (
                                                             <td key={col.id} className={`px-3 md:px-6 py-3 font-medium text-white whitespace-nowrap ${STICKY_CELL}`}>
                                                                 {narrow ? shortName(player.PlayerName) : player.PlayerName}
+                                                                <InjuryBadge
+                                                                    name={player.PlayerName}
+                                                                    status={player.InjuryStatus}
+                                                                    injury={player.Injury}
+                                                                    className="ml-2"
+                                                                />
                                                                 {isTopPick && (
                                                                     <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400 border border-purple-500/30">
                                                                         TOP PICK

@@ -3,6 +3,7 @@ import { fetchCrHistory } from '../../services/api';
 import { loadStored, storeValue } from '../../columns';
 import { FULL_SEASON, applyWindow } from '../../priceWindow';
 import PlayerPicker from '../PlayerPicker';
+import InjuryBadge from '../InjuryBadge';
 import PriceHistoryChart from './PriceHistoryChart';
 import { colorForIndex } from './palette';
 
@@ -194,6 +195,7 @@ export default function PriceTrackerPanel({ season, games = FULL_SEASON, onSelec
                                 style={{ backgroundColor: colorForIndex(i) }}
                             />
                             <span className="text-gray-300">{player.playerName}</span>
+                            <InjuryBadge name={player.playerName} size="xs" />
                             <span className="text-gray-600 tabular-nums">
                                 {player.first.toFixed(1)}→{player.last.toFixed(1)}
                             </span>

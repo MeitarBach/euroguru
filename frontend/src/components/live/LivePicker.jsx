@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import InjuryBadge from '../InjuryBadge';
 import { X, Check, Lock } from 'lucide-react';
 import { GameStatus } from './GameStrip';
 import { euroleagueCode } from '../../lib/live/teams';
@@ -15,9 +16,6 @@ const byAverage = (a, b) =>
 const titleCase = (name) => String(name ?? '').toLowerCase().replace(/\b\p{L}/gu, c => c.toUpperCase());
 
 function PlayerRow({ player, selected, locked, onToggle, showTeam, dots = [] }) {
-    const injury = player.InjuryStatus
-        ? (String(player.InjuryStatus).toUpperCase().startsWith('OUT') ? 'OUT' : 'GTD')
-        : null;
     return (
         <button
             type="button"
@@ -37,13 +35,13 @@ function PlayerRow({ player, selected, locked, onToggle, showTeam, dots = [] }) 
             <span className="min-w-0 flex-1">
                 <span className={`flex items-center gap-1.5 truncate ${selected ? 'text-white font-medium' : 'text-gray-200'}`}>
                     <span className="truncate">{player.PlayerName}</span>
+                    <InjuryBadge name={player.PlayerName} status={player.InjuryStatus} injury={player.Injury} size="xs" />
                     {dots.map(g => (
                         <span key={g.id} title={`In ${g.name}`} className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: g.colorHex }} />
                     ))}
                 </span>
                 <span className="block text-[11px] text-gray-500">
                     {player.position}{showTeam && ` · ${euroleagueCode(player)}`}
-                    {injury && <span className="text-red-300"> · {injury}</span>}
                 </span>
             </span>
             <span className="text-right shrink-0">
@@ -184,7 +182,9 @@ export default function LivePicker({ roster, names, games, focusGame, watch, gro
                                     onClick={() => watch.remove(group.id, p.PlayerKey)}
                                     className="flex items-center gap-1 pl-2 pr-1.5 py-1 rounded-full text-xs bg-purple-500/15 text-purple-200 border border-purple-500/30 hover:bg-purple-500/25"
                                 >
-                                    {p.PlayerName} <X size={12} />
+                                    {p.PlayerName}
+                                    <InjuryBadge name={p.PlayerName} status={p.InjuryStatus} injury={p.Injury} size="xs" />
+                                    <X size={12} />
                                 </button>
                             ))}
                         </div>

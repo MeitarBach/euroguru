@@ -493,14 +493,47 @@ def _injury_records():
     honestly show before tip-off. Never raises: injuries are decoration on that
     endpoint, and losing them should not cost the caller the rest of the response.
     """
-    from utils.data_processing import load_injuries_df
+    from utils.data_processing import load_injuries_df, injury_matches
 
     try:
         inj_df = load_injuries_df()
-        return inj_df.fillna("").to_dict(orient="records") if not inj_df.empty else []
+        if inj_df.empty:
+            return []
+        records = inj_df.fillna("").to_dict(orient="records")
     except Exception as e:
         print(f"[dashboard] injuries unavailable: {e}")
         return []
+    # The app's own name for each reported player (the report spells names in full), so
+    # clicking one opens the right player; "" when none matches.
+    try:
+        names = {h["Player"]: name for name, h in injury_matches(get_data(DEFAULT_SEASON), inj_df).items()}
+    except Exception as e:
+        print(f"[dashboard] injury matching failed: {e}")
+        names = {}
+    for r in records:
+        r["PlayerName"] = names.get(r.get("Player"), "")
+    return records
+
+
+@app.get("/api/injuries")
+def get_injuries():
+    """
+    The current injury report, for the injured badge wherever the app shows a player:
+    {"players": {PlayerName: {"InjuryStatus", "Injury"}}} - matched to the app's names
+    the way load_and_merge_data matches them (injury_matches) - and the report itself.
+    """
+    injuries = _injury_records()
+    return {"players": {r["PlayerName"]: {"InjuryStatus": r.get("InjuryStatus", ""), "Injury": r.get("Injury", "")}
+                        for r in injuries if r.get("PlayerName")},
+            "injuries": injuries}
+
+
+def _healthy(frame):
+    """The players not on the injury report. The dashboard's widgets are picks, and an
+    injured player - OUT or a game-time decision - is not one."""
+    if frame.empty or "InjuryStatus" not in frame.columns:
+        return frame
+    return frame[frame["InjuryStatus"].fillna("").astype(str).str.strip() == ""]
 
 
 @app.get("/api/dashboard")
@@ -551,13 +584,14 @@ def get_dashboard_data(season: str = DEFAULT_SEASON):
         return {"widgets": {}, "injuries": []}
 
     # --- Widget 1: "Who's Hot 🔥" (Last 3 Games) ---
-    stats_hot = calculate_pir_stats(df, last_x_games=3)
+    # Injured players are left out of every widget (the injury panel lists them).
+    stats_hot = _healthy(calculate_pir_stats(df, last_x_games=3))
     if stats_hot.empty:
         return {"widgets": {}, "injuries": []}
     hot_players = stats_hot.sort_values('Average_Score', ascending=False).head(5)
 
     # --- Widget 2: "Consistent Elite 🎯" (Last 5 Games, high scorers, steadiest first) ---
-    stats_cons = calculate_pir_stats(df, last_x_games=5)
+    stats_cons = _healthy(calculate_pir_stats(df, last_x_games=5))
     # Anyone already in Who's Hot is left out, so the two widgets recommend ten
     # different players rather than repeating the same stars. Budget Picks keeps its
     # own pool: a cheap player who is also hot is still the answer to "who fits my cap".

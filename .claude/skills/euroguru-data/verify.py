@@ -13,6 +13,7 @@ import json
 import os
 import sys
 import tempfile
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -23,7 +24,7 @@ from utils.data_fetchers import latest_round  # noqa: E402
 from utils.s3_utils import load_from_s3  # noqa: E402
 from utils.defense_vs_position import rollup_key  # noqa: E402
 from utils.coaches import coaches_key  # noqa: E402
-from utils.data_processing import DUNKEST_TEAM_CODES  # noqa: E402
+from utils.data_processing import DUNKEST_TEAM_CODES, _disambiguate_names  # noqa: E402
 
 SEASON = CURRENT_SEASON
 STATS = f"player_stats_{SEASON}.csv"
@@ -211,14 +212,33 @@ def check_coaches(rep):
     rep.line("PASS", "coaches", f"{len(teams)} coaches, one per club")
 
 
+def _app_names(fantasy):
+    """PlayerID -> the name the app shows. A name two players share ("M. Wright") gets the
+    club, as the app's own _disambiguate_names does ("M. Wright (MIL)"), and /api/player
+    only knows that form."""
+    import contextlib
+    import io
+    with contextlib.redirect_stdout(io.StringIO()):
+        named = _disambiguate_names(fantasy)
+    return dict(zip(named["PlayerID"], named["PlayerName"]))
+
+
 def check_local_api(rep, top_name, top_round):
     try:
         d = _get_json(f"{LOCAL_API}/player?" + urllib.parse.urlencode({"name": top_name, "season": SEASON}))
+    except urllib.error.HTTPError as e:  # the API answered, but not for this name
+        rep.line("FAIL", "local API", f"/api/player {top_name}: HTTP {e.code}")
+        d = None
+    except Exception as e:
+        rep.line("FAIL", "local API", f"not reachable ({e}) - is uvicorn running on :8000?")
+        return
+    if d is not None:
         rounds = [g.get("Round") for g in d.get("games", [])]
         if top_round in rounds:
             rep.line("PASS", "local API", f"/api/player {top_name} has round {top_round}")
         else:
             rep.line("FAIL", "local API", f"/api/player {top_name} rounds {rounds}, no {top_round}")
+    try:
         s = _get_json(f"{LOCAL_API}/stats", {"season": SEASON, "position": "All", "min_cr": 0,
                                              "max_cr": 100, "last_x_games": 100})
         rows = s if isinstance(s, list) else s.get("data", s.get("players", []))
@@ -272,10 +292,11 @@ def check(local_api=False):
             print(f"  R{int(r['GameCode'])}  {r['PlayerName']:<16} {r['Team']:<4} {r['FPT']:>5.1f} FPT  "
                   f"({int(r['Points'])} pts, {r['CR']} CR)")
         lead = top.iloc[0]
+        top_name = _app_names(fantasy).get(lead["PlayerID"], lead["PlayerName"])
         if local_api:
             print()
-            check_local_api(rep, lead["PlayerName"], int(lead["GameCode"]))
-        print(f"\nTOP_SCORER={lead['PlayerName']}")
+            check_local_api(rep, top_name, int(lead["GameCode"]))
+        print(f"\nTOP_SCORER={top_name}")
         print(f"TOP_ROUND={int(lead['GameCode'])}")
 
     print("\nRESULT: " + ("FAIL - do not promote" if rep.failed else "PASS"))

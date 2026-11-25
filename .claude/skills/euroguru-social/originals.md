@@ -163,6 +163,11 @@ Checklist (Round 8's fixes):
   If someone ranks above with fewer games, write "(5+ games)".
 - **post.md's "numbers"**: every number with its source and the math.
 - **post.md's "replies"**: 3-5 likely comments, each with an answer ready (one number, friendly).
+- **A poll** (a vote on a decision, e.g. Round 14's `dilemma-coach`): add `poll` / `poll_he`
+  (2-4 options, 25 characters each; "Other 👇" as the last one invites names in the
+  replies) and `image_reply` / `image_reply_he`. X can't put a poll on an image post, so
+  post.md lays out the poll as the post, the image in the first reply with that text, and
+  the link in the second.
 
 ## Timing (your local time)
 - **Preview**:

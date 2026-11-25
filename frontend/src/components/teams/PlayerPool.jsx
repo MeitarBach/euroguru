@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import InjuryBadge from '../InjuryBadge';
 import { Check, Plus } from 'lucide-react';
 import { euroleagueCode } from '../../lib/live/teams';
 import { nameMatches } from '../../lib/live/names';
@@ -133,10 +134,12 @@ export default function PlayerPool({
                                             {selected ? <Check size={11} strokeWidth={3} /> : <Plus size={10} />}
                                         </span>
                                         <span className="min-w-0">
-                                            <span className={`block truncate ${selected ? 'text-white font-medium' : 'text-gray-200'}`}>{r.player.PlayerName}</span>
+                                            <span className={`flex items-center gap-1.5 min-w-0 ${selected ? 'text-white font-medium' : 'text-gray-200'}`}>
+                                                <span className="truncate">{r.player.PlayerName}</span>
+                                                <InjuryBadge name={r.player.PlayerName} status={r.injury ?? r.player.InjuryStatus} injury={r.player.Injury} size="xs" />
+                                            </span>
                                             <span className="block text-[11px] text-gray-500">
                                                 {r.player.position} · {euroleagueCode(r.player)}
-                                                {r.injury && <span className={String(r.injury).toUpperCase().startsWith('OUT') ? 'text-red-300' : 'text-amber-300'}> · {String(r.injury).toUpperCase().startsWith('OUT') ? 'OUT' : 'GTD'}</span>}
                                             </span>
                                         </span>
                                     </span>

@@ -406,7 +406,7 @@ def load_and_merge_data(
     """
     Loads player stats and merges:
       1) most recent CR file: player_cr_data_YYYY-MM-DD.csv
-      2) optional injury report (injury_report.csv) on PlayerName
+      2) optional injury report (injury_report.csv), matched by injury_matches()
 
     Returns a row-level dataframe with columns like:
       PlayerName, position, CR, PIR, ... , InjuryStatus, Injury
@@ -536,17 +536,9 @@ def _build_merged_frame(candidates, cr_key, index, include_injuries, injuries_ke
             inj_df = pd.DataFrame()
 
         if inj_df is not None and not inj_df.empty:
-            # Keep only the minimal columns and de-duplicate by player
-            cols = [c for c in ["Player", "InjuryStatus", "Injury"] if c in inj_df.columns]
-            inj_min = inj_df[cols].drop_duplicates(subset=["Player"]) if "Player" in cols else pd.DataFrame()
-            if not inj_min.empty:
-                merged_df = merged_df.merge(
-                    inj_min,
-                    left_on="PlayerName",
-                    right_on="Player",
-                    how="left",
-                    suffixes=("", "_inj"),
-                ).drop(columns=[c for c in ["Player"] if c in merged_df.columns])
+            hits = injury_matches(merged_df, inj_df)
+            merged_df["InjuryStatus"] = merged_df["PlayerName"].map(lambda n: hits.get(n, {}).get("InjuryStatus"))
+            merged_df["Injury"] = merged_df["PlayerName"].map(lambda n: hits.get(n, {}).get("Injury"))
 
         # fill NaNs to keep hovers clean
         for c in ["InjuryStatus", "Injury"]:
@@ -787,7 +779,17 @@ def _cr_for_merge(cr_df):
 
 
 def _coalesce_identity(merged_df):
-    """Fill identity columns from the CR side for players with no stats rows."""
+    """
+    Fill identity columns from the CR side for players with no stats rows, and keep the
+    CR side's club as CurrentTeam on every row.
+
+    Team stays the club of each game - the schedule join and the matchup tables need
+    that - but the price list is the only source that knows where a player is *now*.
+    After a mid-season transfer his games all say the old club until he has played for
+    the new one, so the per-player rows read CurrentTeam instead (_current_club).
+    """
+    if "CRTeam" in merged_df.columns:
+        merged_df["CurrentTeam"] = merged_df["CRTeam"]
     for target, source in (("PlayerName", "CRPlayerName"), ("Team", "CRTeam")):
         if source not in merged_df.columns:
             continue
@@ -1242,6 +1244,8 @@ def calculate_pir_stats(df, last_x_games):
         base_firsts["PlayerKey"] = "first"
     if "TeamCode" in df_sorted.columns:
         base_firsts["TeamCode"] = "first"
+    if "CurrentTeam" in df_sorted.columns:
+        base_firsts["CurrentTeam"] = "first"
     if "InjuryStatus" in df_sorted.columns:
         base_firsts["InjuryStatus"] = "first"
     if "Injury" in df_sorted.columns:
@@ -1308,6 +1312,8 @@ def calculate_pir_stats(df, last_x_games):
         if col in last_games_stats.columns:
             last_games_stats[col] = pd.to_numeric(last_games_stats[col], errors="coerce").round(1)
 
+    last_games_stats = _current_club(last_games_stats)
+
     # friendly order (safe; keeps any optional cols at end)
     last_games_stats = last_games_stats.reindex(columns=[c for c in ordered if c in last_games_stats.columns] +
                                                [c for c in last_games_stats.columns if c not in ordered])
@@ -1364,10 +1370,12 @@ def calculate_player_averages(df, last_x_games):
         base_firsts["PlayerKey"] = "first"
     # The three-letter code from the schedule join. Team names run to 34 characters
     # ("CRVENA ZVEZDA MERIDIANBET BELGRADE"), which a phone cannot spare; the client
-    # shows the code there instead. "first" is safe for the same reason as above,
-    # except for a mid-season transfer, where the most recent team is the useful one.
+    # shows the code there instead. "first" is the most recent game's club; after a
+    # mid-season transfer _current_club replaces it with the price list's.
     if "TeamCode" in df_sorted.columns:
         base_firsts["TeamCode"] = "first"
+    if "CurrentTeam" in df_sorted.columns:
+        base_firsts["CurrentTeam"] = "first"
     if "InjuryStatus" in df_sorted.columns:
         base_firsts["InjuryStatus"] = "first"
 
@@ -1398,6 +1406,32 @@ def calculate_player_averages(df, last_x_games):
         if c.startswith("Average_"):
             grouped[c] = grouped[c].round(1)
 
+    return _current_club(grouped)
+
+
+def _current_club(grouped):
+    """
+    A per-player row's Team and TeamCode as of today: the club the latest price list
+    puts him at, else (no price row) the one of his latest game.
+
+    The live tabs find a player's game, and his boxscore line, by TeamCode. Taken from
+    his latest game alone, a player who moved mid-season was looked for in his old
+    club's game until his first game for the new one had been fetched - so it was
+    missing from every team's live score exactly on his debut night (K. Kamenjas, Dubai
+    to Baskonia, Round 12).
+    """
+    if "CurrentTeam" not in grouped.columns:
+        return grouped
+    grouped = grouped.copy()
+    now = grouped.pop("CurrentTeam").astype("string").str.strip().str.upper()
+    known = now.notna() & (now != "") & (now != "NAN")
+    if not known.any():
+        return grouped
+    if "Team" in grouped.columns:
+        grouped["Team"] = grouped["Team"].where(~known, now)
+    if "TeamCode" in grouped.columns:
+        code = now.map(DUNKEST_TEAM_CODES)
+        grouped["TeamCode"] = grouped["TeamCode"].where(~(known & code.notna()), code)
     return grouped
 
 
@@ -1578,6 +1612,63 @@ def load_injuries_df(key: str = "injury_report.csv", index=None) -> pd.DataFrame
 
     _cache_put(_injury_cache, cache_key, df)
     return df.copy()
+
+_NAME_SUFFIXES = {"JR", "SR", "II", "III", "IV", "V"}
+
+
+def _injury_key(name) -> str:
+    """_name_key() without a generational suffix or the "(PAR)" the app adds to namesakes."""
+    initial, surname = _name_key(re.sub(r"\s*\([^)]*\)$", "", str(name))).split("|", 1)
+    return f"{initial}|{' '.join(w for w in surname.split() if w not in _NAME_SUFFIXES)}"
+
+
+def injury_matches(frame: pd.DataFrame, inj_df: pd.DataFrame) -> dict:
+    """
+    PlayerName -> {"InjuryStatus", "Injury", "Player"} for each player the injury report names.
+
+    The report (Rotowire) writes full names - "Juhann Begarin" - where the app has
+    "J. Begarin", so an exact join never matched anyone. They meet on initial + surname
+    (_injury_key), and on the club (the report's Team is the fantasy game's code, like
+    the app's Team) when a key is shared - "C. Jones" of Paris is not Carlik Jones.
+    A report row that no rule ties to one player is left out, never guessed.
+    """
+    if frame.empty or inj_df.empty or "Player" not in inj_df.columns or "PlayerName" not in frame.columns:
+        return {}
+    report = {}
+    for row in inj_df.to_dict("records"):
+        status = str(row.get("InjuryStatus") or "").strip()
+        if status:
+            report.setdefault(_injury_key(row["Player"]), []).append(row)
+
+    # Each player's latest club (a player can move mid-season).
+    cols = [c for c in ("PlayerName", "Team", "GameCode") if c in frame.columns]
+    players = frame[cols].drop_duplicates()
+    if "GameCode" in players.columns:
+        players = players.sort_values("GameCode", na_position="first")
+    latest = players.groupby("PlayerName")["Team"].last() if "Team" in players.columns else \
+        pd.Series(index=players["PlayerName"].unique(), dtype=object)
+
+    by_key = {}
+    for name in latest.index:
+        by_key.setdefault(_injury_key(name), []).append(name)
+
+    out = {}
+    for name, team in latest.items():
+        rows = report.get(_injury_key(name))
+        if not rows:
+            continue
+        team = str(team or "").strip().upper()
+        same_club = [r for r in rows if str(r.get("Team") or "").strip().upper() == team]
+        if len(same_club) == 1:
+            hit = same_club[0]
+        elif not same_club and len(rows) == 1 and len(by_key[_injury_key(name)]) == 1:
+            hit = rows[0]  # one player and one report row by that name: a club code the two spell apart
+        else:
+            continue
+        out[name] = {"InjuryStatus": str(hit.get("InjuryStatus") or "").strip(),
+                     "Injury": str(hit.get("Injury") or "").strip(), "Player": hit.get("Player")}
+    return out
+
 
 def add_injury_badge(df: pd.DataFrame) -> pd.DataFrame:
     """

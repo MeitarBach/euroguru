@@ -10,6 +10,12 @@ Its job: have everything ready, say what to do in what order, and help with repl
 
 ## When triggered: prepare and brief
 
+0. **After a round** (its recap is due): export the EuroGuru public room's board first, so
+   the recap gets its **room-winner** post (see "Room winner" below):
+   `python3 .claude/skills/euroguru-social/generate.py room-sql` prints the query for the
+   last finished round; run it with the
+   Supabase MCP `execute_sql` (project `iijewijzcnjjjlasupho`) and save the `board` value,
+   as is, to `social/rooms/round-XX.json`.
 1. Run (from the repo root; the cert is needed on the work network):
    ```bash
    SSL_CERT_FILE=backend/.ca-bundle.pem python3 .claude/skills/euroguru-social/generate.py prepare
@@ -45,8 +51,37 @@ Its job: have everything ready, say what to do in what order, and help with repl
 
 The core set, in the order of a round: budget-picks (2 days before lock) → hot-hand (day
 before) → captain-poll (~5h before lock; add the poll options in X's composer) →
-game-night (after each evening) → team-of-the-round (morning after). Everything else in
-POSTS.md is optional.
+game-night (after each evening) → team-of-the-round (morning after) → room-winner (that
+afternoon). Everything else in POSTS.md is optional.
+
+## Room winner: the Watch Room's top team, every round
+A recap post (`room-winner`, core) that shouts out the top team of the round in the
+**EuroGuru public room** (`ROOM_ID` in `generate.py`). **One template every week** - the
+image and the text never change wording, only the data:
+- **The image** is the team card (`render_court`): the title is always "EuroGuru room
+  winner of the week"; under it the team in bold ("· managed by <nickname>" when the
+  nickname differs) and its total. The tiles: the total, the captain's points, the top
+  scorer, the coach's points. The court: the whole roster as the round counted it (subs
+  included), each player on his real FPT, the captain ×2, the 6th man, the bench at 50%,
+  the coach with his game ("Won by 14 vs BAS").
+- **The text**: "Shout out to the Guru's room winner of the week: <team> by <nickname> with
+  X FPT in Round N 👏" ("in Round N" goes when long names push it past 275 characters), the
+  captain's line, the coach's points, the top 2 scorers besides the captain, and the call
+  to bring a team. The reply's link opens the room (`?room=<code>`).
+- **Scored like the room's board** (`room_team()`): FPT × role (captain 2, starters and the
+  6th man 1, the other 4 on the bench 0.5) + the coach's points; a player who sat out
+  scores 0. The run's notes list the whole board - check it against the room in the app.
+- **The house team** (the room admin's own, `house` in the export) can win, and gets the
+  same template. `generate.py post --round N --only room-winner --skip-house` gives the
+  week to the best community team instead - the notes suggest it when the house won.
+- **The winner is a community member**: the post names their nickname in the room. The
+  notes remind you to tag their X handle if you know it. No other team is named.
+- No board file → no post, and the run's notes say how to export it.
+- **A one-off wording for one round** (a first week, a milestone): add `hook`, `lines`,
+  `question` and their `_he` versions to that round's board file - the post uses them
+  instead of the template's (the image stays the template); measure with `x_length`, ≤280.
+  Round 11's, the first, is the example: "Every week we'll shout out the room's winner of
+  the round and break down their team 👑 …".
 
 ## Originals (✦): 3-4 out-of-the-box posts every run
 The catalogue repeats its shapes every round; originals don't. Each is **one surprising,
@@ -225,6 +260,8 @@ python3 $G prepare                   # everything for now + social/POSTS.md
 python3 $G live                      # current fantasy leaders card (for replies)
 python3 $G pre|post|night [--round N] [--date YYYY-MM-DD] [--only ids]   # one batch by hand
 python3 $G team [--budget 105] [--with names] [--without names] [--core 3-2-2] [--coach best] [--captain best] [--value avg] [--replay N]  # a squad on a court
+python3 $G room-sql [--round N]       # the query that exports the room's board (run it with the Supabase MCP)
+python3 $G post --round N --only room-winner [--skip-house]   # the room-winner post again, e.g. after a new export
 python3 $G banner                    # the X profile banner → social/profile/banner.png
 O=.claude/skills/euroguru-social/originals.py
 python3 $O facts social/round-XX/<batch> [--refresh]   # the stories sheet (+ the batch's frozen data)

@@ -3,6 +3,7 @@ import {
     ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip,
     ResponsiveContainer, Label, ReferenceLine,
 } from 'recharts';
+import InjuryBadge from '../InjuryBadge';
 
 const POSITION_COLORS = { G: '#8b5cf6', F: '#22d3ee', C: '#f59e0b' };
 const DEFAULT_COLOR = '#8b5cf6';
@@ -21,7 +22,10 @@ const CustomTooltip = ({ active, payload, fields }) => {
         const data = payload[0].payload;
         return (
             <div className="rounded-lg bg-[#16161a] border border-white/15 shadow-2xl px-3 py-2 text-xs">
-                <p className="font-bold text-white mb-1">{data.PlayerName}</p>
+                <p className="font-bold text-white mb-1 flex items-center gap-2">
+                    {data.PlayerName}
+                    <InjuryBadge name={data.PlayerName} status={data.InjuryStatus} injury={data.Injury} size="xs" withInjury />
+                </p>
                 <p className="text-gray-300">Pos: {data.position}</p>
                 {/* Priced players with no games yet arrive with a null score, so no
                     value here can be assumed to be a number. */}

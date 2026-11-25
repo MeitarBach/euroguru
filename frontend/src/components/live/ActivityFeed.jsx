@@ -1,4 +1,5 @@
 import React from 'react';
+import InjuryBadge from '../InjuryBadge';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Zap } from 'lucide-react';
 import { signed, surnameOf } from '../../lib/live/format';
@@ -38,6 +39,7 @@ export default function ActivityFeed({ events, nameOf, groupsOf, title }) {
                                 {event.kind === 'player' ? (
                                     <span className="min-w-0 flex-1 text-gray-300">
                                         <span className="text-white font-medium">{surnameOf(nameOf(event.key, event))}</span>
+                                        <InjuryBadge name={nameOf(event.key, event)} size="xs" className="ml-1 align-middle" />
                                         {groupsOf(event.key).map(g => (
                                             <span
                                                 key={g.id}

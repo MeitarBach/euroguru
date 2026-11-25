@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { fetchPlayerDetail } from '../services/api';
+import InjuryBadge from './InjuryBadge';
 import { X } from 'lucide-react';
 import InfoTip from './InfoTip';
 import usePriceTrend from '../hooks/usePriceTrend';
@@ -83,7 +84,10 @@ export default function PlayerDetailView({ name, season, onClose }) {
             >
                 <div className="flex items-start justify-between">
                     <div>
-                        <h2 className="text-2xl font-bold text-white">{name}</h2>
+                        <h2 className="text-2xl font-bold text-white flex items-center gap-3 flex-wrap">
+                            {name}
+                            <InjuryBadge name={summary.PlayerName ?? name} size="md" withInjury />
+                        </h2>
                         <p className="text-sm text-gray-400">
                             {summary.Team || '-'} • {summary.position || '-'} • {season} season
                         </p>

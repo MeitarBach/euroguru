@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import InjuryBadge from '../../InjuryBadge';
 import { LayoutGroup } from 'framer-motion';
 import { Radio, UserPlus, Plus } from 'lucide-react';
 import WatchCard from '../WatchCard';
@@ -37,6 +38,7 @@ function EmptyState({ group, suggestions, onAdd, onPick }) {
                                 className="inline-flex items-center gap-1.5 pl-2 pr-2.5 py-1.5 rounded-full text-xs border border-white/10 bg-white/5 text-gray-200 hover:bg-purple-500/15 hover:border-purple-500/30"
                             >
                                 <Plus size={12} /> {p.PlayerName}
+                                <InjuryBadge name={p.PlayerName} status={p.InjuryStatus} injury={p.Injury} size="xs" />
                                 <span className="font-mono text-gray-500">{p.Average_Score.toFixed(1)}</span>
                             </button>
                         ))}
