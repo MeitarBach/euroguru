@@ -282,8 +282,14 @@ def display_name(name):
     return re.sub(r"-([a-z])", lambda m: "-" + m.group(1).upper(), name)
 
 
+def card_name(name):
+    """A player's name on a card: the feed's club suffix for a shared name ('M. Wright (MIL)')
+    goes - the card shows his club right under it."""
+    return re.sub(r"\s*\([^)]*\)$", "", display_name(name))
+
+
 def surname(name):
-    clean = re.sub(r"\s*\([^)]*\)$", "", display_name(name))
+    clean = card_name(name)
     return clean.split(" ", 1)[1] if " " in clean else clean
 
 
@@ -326,7 +332,7 @@ def photo_body(items):
         cards.append(
             f'<div class="pcard"><div class="halo"></div>{photo}<span class="chip">{it["pos"]}</span>'
             f'{"" if compact else stat}'
-            f'<div class="info"><div class="name">{html.escape(display_name(it["name"]))}{tag}</div>'
+            f'<div class="info"><div class="name">{html.escape(card_name(it["name"]))}{tag}</div>'
             f'<div class="line">{html.escape(it.get("line") or "")}</div>'
             f'{stat if compact else (f"<div class=meta>{meta}</div>" if meta else "")}</div></div>')
     return (f'<div class="pcards{" compact" if compact else ""}" '
@@ -667,11 +673,150 @@ def post_live(ctx):
     }
 
 
+# --- the room winner: the EuroGuru public Watch Room's top team of the round -----------------
+
+# The public room the post shouts out. Its board is in Supabase, which this script can't
+# read, so each round it is exported first: `generate.py room-sql` prints the query, the
+# Supabase connector runs it, and its `board` value is saved as social/rooms/round-NN.json.
+ROOM_ID = "f078e9f2-3fdb-462c-9ceb-ab512cd4acb1"
+ROOMS_DIR = OUT_ROOT / "rooms"
+ROLE_FACTOR = {"captain": 2, "starter": 1, "sixth": 1, "bench": 0.5}  # the room board's (lib/live/rows.js)
+ROOM_REPLY = {"en": "Bring your team to the EuroGuru room - free, live scores and a chat that's always open 👉 {url}",
+              "he": "הביאו את הקבוצה שלכם לחדר של EuroGuru - בחינם, ניקוד חי וצ'אט שפתוח תמיד 👉 {url}"}
+
+
+def room_sql(rnd):
+    """The query that exports the room's board for a round: every team with a lineup for
+    it (as the round counted it, subs included), its owner's nickname, and whether it is the
+    house team (the room admin's own)."""
+    return f"""select json_build_object(
+    'room', r.name, 'code', r.invite_code, 'season', {SEASON}, 'round', {rnd},
+    'teams', coalesce(json_agg(json_build_object(
+        'team', t.name, 'nickname', coalesce(p.nickname, 'Player'), 'house', t.owner = r.admin,
+        'joined_at', rt.joined_at, 'lineup', tr.lineup) order by rt.joined_at)
+        filter (where tr.lineup is not null), '[]'::json)
+) as board
+from public.rooms r
+join public.room_teams rt on rt.room_id = r.id
+join public.teams t on t.id = rt.team_id
+left join public.profiles p on p.user_id = t.owner
+left join public.team_rounds tr on tr.team_id = t.id and tr.season = {SEASON} and tr.round = {rnd}
+where r.id = '{ROOM_ID}'
+group by r.id;"""
+
+
+def room_team(entry, by_key, fpt, coaches, played):
+    """One room team scored the way the room's board scores it: each player's real FPT for
+    the round times his role (captain 2, starters and the sixth man 1, the other 4 on the
+    bench 0.5) plus the coach's points for his club's margin. A player who sat out scores 0."""
+    lu = entry["lineup"] or {}
+    bench = lu.get("bench") or []
+    players = []
+    for k in lu.get("keys") or []:
+        p = by_key.get(k)
+        if not p:
+            continue
+        role = ("captain" if k == lu.get("captain") else "sixth" if bench and k == bench[0]
+                else "bench" if k in bench else "starter")
+        players.append({"name": p["PlayerName"], "pos": p["position"], "team": el_code(p), "cr": p["CR"],
+                        "played": fpt.get(k), "fpt": fpt.get(k) or 0.0, "role": role})
+    c = coaches.get(lu.get("coach"))
+    coach = None
+    if c:
+        coach = {"name": c["CoachName"], "team": c["TeamCode"], "cr": c["CR"], "pts": 0, "line": "no game"}
+        for _, home, away, margin in played:
+            if c["TeamCode"] in (home, away):
+                m, opp = (margin, away) if c["TeamCode"] == home else (-margin, home)
+                coach.update(pts=coach_points(m), margin=m,
+                             line=f"{'Won' if m > 0 else 'Lost'} by {abs(m)} {'vs' if c['TeamCode'] == home else 'at'} {opp}")
+    total = sum(p["fpt"] * ROLE_FACTOR[p["role"]] for p in players) + (coach["pts"] if coach else 0)
+    return {**entry, "players": players, "coach": coach, "total": round(total, 1)}
+
+
+def post_room_winner(ctx):
+    """Shout out the room's top team of the round: its full roster on the court with each
+    player's real score, the captain, the coach and the top performers. With skip_house
+    (post --skip-house) the house team is left out and the best community team gets it."""
+    rnd = ctx["round"]
+    path = ROOMS_DIR / f"round-{rnd:02d}.json"
+    if not path.exists():
+        ctx["notes"].append(f"room-winner: no board for Round {rnd} - `generate.py room-sql --round {rnd}`, run it with "
+                            f"the Supabase connector, save its board as social/rooms/round-{rnd:02d}.json, then "
+                            f"`generate.py post --round {rnd} --only room-winner`")
+        return None
+    board = json.loads(path.read_text())
+    by_key = {p["PlayerKey"]: p for p in ctx["season"]}
+    fpt = {p["PlayerKey"]: p["fpt"] for p in ctx["scores"]}
+    coaches = {f"coach:{c['CoachID']}": c for c in api_get(f"/coaches?season={SEASON}")}
+    played = [x for x in results() if x[0] == rnd]
+    teams = sorted((room_team(t, by_key, fpt, coaches, played) for t in board["teams"]),
+                   key=lambda t: (-t["total"], t["joined_at"]))
+    field = [t for t in teams if not (ctx.get("skip_house") and t["house"])]
+    if not field:
+        ctx["notes"].append(f"room-winner: no team in the room had a Round {rnd} lineup")
+        return None
+    win = field[0]
+    ctx["notes"].append("room-winner: the board - " + " · ".join(
+        f"{t['team']} ({t['nickname']}{', house' if t['house'] else ''}) {num(t['total'])}" for t in teams))
+    if len(field) > 1 and field[1]["total"] == win["total"]:
+        ctx["notes"].append(f"room-winner: a tie at {num(win['total'])} with {field[1]['team']} - shout out both?")
+    ps = win["players"]
+    starters = [p for p in ps if p["role"] in ("captain", "starter")]
+    cap = next((p for p in ps if p["role"] == "captain"), None)
+    sixth = next((p for p in ps if p["role"] == "sixth"), None)
+    bench = [p for p in ps if p["role"] == "bench"]
+    coach = win["coach"]
+    if len(starters) != 5 or not cap or not sixth or len(bench) != 4 or not coach:
+        ctx["notes"].append(f"room-winner: {win['team']}'s lineup is incomplete - not drawn")
+        return None
+
+    # One template every week, whoever wins: only the data changes.
+    top = sorted((p for p in ps if p is not cap and p["played"] is not None), key=lambda p: -p["fpt"])[:2]
+    name, club = win["nickname"], win["team"]
+    total = num(win["total"])
+    who = html.escape(club) + ("" if name == club else f" · managed by {html.escape(name)}")
+    game = {"players": {p["name"]: p["played"] for p in ps if p["played"] is not None},
+            "coach": coach["pts"], "coach_game": coach["line"]}
+    card = {"badge": f"Round {rnd} · Room winner", "title": "EuroGuru room winner of the week",
+            "subtitle": f"{club} · {total} FPT in Round {rnd}",
+            "subtitle_html": (f'<b style="color:#fff;font-size:25px;font-weight:800">{who}</b>'
+                              f" · {total} FPT in Round {rnd}"),
+            "kpis": [(total, f"FPT in Round {rnd}", "up"),
+                     (num(2 * cap["fpt"]), f"{surname(cap['name'])} as captain", "gold"),
+                     (num(top[0]["fpt"]) if top else "-", f"{surname(top[0]['name'])}, top scorer" if top else "top scorer", "up"),
+                     (f"{coach['pts']:+d}", f"{surname(coach['name'])} coach", "up" if coach["pts"] > 0 else "")]}
+    team = {"starters": starters, "captain": cap, "sixth": sixth, "bench": bench, "coach": coach}
+    cap_line = f"{surname(cap['name'])} {num(cap['fpt'])} ×2 = {num(2 * cap['fpt'])}"
+    tops = " · ".join(f"{surname(p['name'])} {num(p['fpt'])}" for p in top)
+    if win["house"]:
+        ctx["notes"].append("room-winner: the house team won - `post --round N --only room-winner --skip-house` gives "
+                            "the week to the best community team")
+    else:
+        ctx["notes"].append(f"room-winner: names {name} ({club}), their nickname in the room - tag their X handle if "
+                            "you know it")
+    lines = [f"Captain: {cap_line}", f"Coach: {surname(coach['name'])} {coach['pts']:+d}", f"Top scorers: {tops}"]
+    hook = f"Shout out to the Guru's room winner of the week: {club} by {name} with {total} FPT in Round {rnd} 👏"
+    if x_length("\n".join([hook, "", *lines, "", DEBATE["room-winner"][0], "", TAG])) > 275:  # a long name
+        hook = hook.replace(f" in Round {rnd}", "")
+    # A one-off wording for a round: hook / lines / question (and their _he) in its board file.
+    words = {k: board[k] for k in ("hook", "hook_he", "lines", "lines_he", "question", "question_he") if k in board}
+    if words:
+        ctx["notes"].append(f"room-winner: Round {rnd}'s own wording ({', '.join(words)}) from {path.name}")
+    return {"title": f"Room winner of the week: {club} by {name}", "court": {"team": team, "card": card, "game": game},
+            "hook": hook,
+            "hook_he": f"כל הכבוד לזוכה השבועי בחדר של הגורו: {club} של {name} עם {total} FPT במחזור {rnd} 👏",
+            "lines": lines,
+            "lines_he": [f"קפטן: {cap_line}", f"מאמן: {surname(coach['name'])} {coach['pts']:+d}",
+                         f"המצטיינים: {tops}"],
+            "query": f"room={board['code']}", "reply": ROOM_REPLY, **words}
+
+
 PRE = [("consistent-by-position", post_consistent), ("hot-hand", post_hot), ("budget-picks", post_budget),
        ("value-kings", post_value), ("injury-watch", post_injuries), ("smart-picks", post_smart),
        ("captain-poll", post_captain_poll)]
 POST = [("round-top-performers", post_top_performers), ("team-of-the-round", post_team_of_round),
-        ("round-thread", post_round_thread), ("round-bargains", post_bargains), ("price-movers", post_price_movers)]
+        ("round-thread", post_round_thread), ("round-bargains", post_bargains), ("price-movers", post_price_movers),
+        ("room-winner", post_room_winner)]
 NIGHT = [("game-night", post_game_night)]
 LIVE = [("live-leaders", post_live)]
 
@@ -698,6 +843,7 @@ DEBATE = {
     "game-night": ("Who was your MVP tonight? 👇", "מי היה ה-MVP שלכם הערב? 👇"),
     "live-leaders": ("Who's carrying your team tonight? 👇", "מי סוחב לכם את הקבוצה הערב? 👇"),
     "round-thread": ("What did Round {r} teach you? 👇", "מה למדתם ממחזור {r}? 👇"),
+    "room-winner": ("Beat them next round? Bring your team 👇", "תנצחו אותם במחזור הבא? הביאו את הקבוצה לחדר 👇"),
 }
 REPLY = {"en": "Live fantasy points, stats & smart picks, free 👉 {url}",
          "he": "נקודות פנטזי בזמן אמת, סטטיסטיקות והמלצות, בחינם 👉 {url}"}
@@ -712,8 +858,11 @@ def compose(post_id, card, campaign):
     X shows posts with outside links to far fewer people."""
     out = {}
     for lang in ("en", "he"):
-        reply = REPLY[lang].format(url=utm(campaign, lang))
-        question = DEBATE.get(post_id, ("", ""))[0 if lang == "en" else 1]
+        url = utm(campaign, lang)
+        if card.get("query"):  # e.g. room=<invite code>: the link opens that page
+            url = url.replace("/?", f"/?{card['query']}&", 1)
+        reply = (card.get("reply") or REPLY)[lang].format(url=url)
+        question = card.get("question" if lang == "en" else "question_he") or DEBATE.get(post_id, ("", ""))[0 if lang == "en" else 1]
         if "thread" in card:
             thread = card["thread" if lang == "en" else "thread_he"]
             round_no = re.search(r"\d+", campaign).group().lstrip("0")
@@ -723,7 +872,7 @@ def compose(post_id, card, campaign):
         insight = card.get("insight" if lang == "en" else "insight_he")
         # The image carries the full list, so when the text runs long the last player
         # lines go - never the hook, the punchline or the question.
-        lines = list(card["lines"])
+        lines = list(card.get("lines_he") if lang == "he" and card.get("lines_he") else card["lines"])
         while True:
             main = "\n".join(x for x in [hook, "", *lines, "", insight, question, "", TAG] if x is not None)
             main = re.sub(r"\n{3,}", "\n\n", main)
@@ -771,7 +920,7 @@ def reddit_draft(rnd, posts, out):
     (out / "reddit.md").write_text("\n".join(lines) + "\n")
 
 
-def generate(mode, rnd=None, only=None, night=None):
+def generate(mode, rnd=None, only=None, night=None, skip_house=False):
     """Build one batch. Returns (round, output dir, {id: post}). Each post gets its own
     folder: post.md (its text in both languages) and <id>.png when it has an image."""
     if not Path(CHROME).exists():
@@ -787,7 +936,7 @@ def generate(mode, rnd=None, only=None, night=None):
         raise SystemExit("No round to cover right now.")
 
     season = stats(100)
-    ctx = {"round": rnd, "season": season, "notes": []}
+    ctx = {"round": rnd, "season": season, "notes": [], "skip_house": skip_house}
     if mode == "pre":
         # The ranking pools: only players with more than half of their club's games.
         ctx.update(last3=stats(3, True), last5=stats(5, True), regulars=stats(100, True), inj=injuries(),
@@ -831,6 +980,10 @@ def generate(mode, rnd=None, only=None, night=None):
         if "body" in card:
             png = folder / f"{post_id}.png"
             render(card, badge, png)
+            post["image"] = png
+        elif "court" in card:  # a whole squad on a court (1200x1350)
+            png = folder / f"{post_id}.png"
+            render_court(card["court"]["team"], card["court"]["card"], png, card["court"]["game"])
             post["image"] = png
         write_post_md(post)
         made[post_id] = post
@@ -928,7 +1081,7 @@ def write_batch_index(rnd, mode, out, made, notes):
 
 # The posts worth a minute of manual posting, in the order they go out. The rest of the
 # catalogue is generated too and listed as optional.
-CORE = {"budget-picks", "hot-hand", "captain-poll", "game-night", "team-of-the-round"}
+CORE = {"budget-picks", "hot-hand", "captain-poll", "game-night", "team-of-the-round", "room-winner"}
 
 # Each batch's originals (originals.py) add a block like this to the end of social/POSTS.md;
 # write_plan() keeps it for as long as its batch is current.
@@ -968,7 +1121,7 @@ def prepare():
             morning = _next_morning(last + timedelta(hours=2))
             slots = {"team-of-the-round": morning, "round-top-performers": morning,
                      "round-thread": morning + timedelta(hours=4), "round-bargains": morning + timedelta(hours=9),
-                     "price-movers": morning + timedelta(days=1, hours=3)}
+                     "price-movers": morning + timedelta(days=1, hours=3), "room-winner": morning + timedelta(hours=6)}
             for pid, post in made.items():
                 add(max(slots.get(pid, morning), now), post, out)
 
@@ -1476,7 +1629,8 @@ def render_court(team, card, png, game=None):
     """The team card (1200x1350). `card`: badge, title, subtitle, kpis [(value, label, tone)].
     `game` draws one finished round's real scores instead of the averages (round_game())."""
     fields = {"css": (SKILL / "card.css").as_uri(), "mascot": MASCOT.as_uri(), "badge": html.escape(card["badge"]),
-              "title": html.escape(card["title"]), "subtitle": html.escape(card["subtitle"]),
+              "title": html.escape(card["title"]),
+              "subtitle": card.get("subtitle_html") or html.escape(card["subtitle"]),
               "kpis": "".join(f'<div class="kpi {tone}"><b>{html.escape(value)}</b><small>{html.escape(label)}</small></div>'
                               for value, label, tone in card["kpis"]),
               "lines": court_lines(), "starters": court_starters(team, game), "bench": court_bench(team, game),
@@ -1696,10 +1850,12 @@ def team_card(budget, with_names=(), min_c=0.0, title=None, subtitle=None, badge
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("mode", choices=["prepare", "pre", "post", "night", "live", "team", "banner", "og"])
+    ap.add_argument("mode", choices=["prepare", "pre", "post", "night", "live", "team", "banner", "og", "room-sql"])
     ap.add_argument("--round", type=int, help="round number (default: chosen from the schedule)")
     ap.add_argument("--date", help="game night date, YYYY-MM-DD (night mode; default today)")
     ap.add_argument("--only", help="comma-separated post ids")
+    ap.add_argument("--skip-house", action="store_true",
+                    help="post mode: the room-winner post leaves out the house team (the best community team gets it)")
     ap.add_argument("--budget", type=float, default=105.0, help="team mode: credits, coach included")
     ap.add_argument("--with", dest="with_players", help="team mode: comma-separated players who must be in")
     ap.add_argument("--without", help="team mode: comma-separated players to leave out (injury doubts)")
@@ -1745,6 +1901,9 @@ def main():
             print(f"  Round {args.replay} card: {shown.relative_to(REPO)}")
         print(f"\n{(out / 'team.md').relative_to(REPO)}")
         return
+    if args.mode == "room-sql":
+        print(room_sql(args.round or last_finished_round(schedule())))
+        return
     if args.mode == "banner":
         print(render_banner())
         return
@@ -1766,7 +1925,8 @@ def main():
         print(f"\nAll posts, in order: {(OUT_ROOT / 'POSTS.md').relative_to(REPO)}")
         return
     night = datetime.strptime(args.date, "%Y-%m-%d").date() if args.date else None
-    rnd, out, made, notes = generate(args.mode, args.round, set(args.only.split(",")) if args.only else None, night)
+    rnd, out, made, notes = generate(args.mode, args.round, set(args.only.split(",")) if args.only else None, night,
+                                     args.skip_house)
     for post_id, post in made.items():
         longest = tweet_lengths(post["tweets"])
         flag = "  ⚠ over X's 280 limit" if longest > 280 else ""

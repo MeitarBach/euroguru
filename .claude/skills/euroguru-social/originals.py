@@ -40,6 +40,7 @@ DEFAULT_BOX = {"top": 0.035, "head_x": 0.49, "left": 0.13, "right": 0.86, "botto
 MASCOT = g.MASCOT.as_uri()
 CATALOGUE = {pid for pid, _ in g.PRE + g.POST + g.NIGHT + g.LIVE}
 POST_KEYS = ("id", "format", "title", "when", "html", "what", "en", "he", "numbers", "replies")
+POLL_KEYS = ("poll", "poll_he", "image_reply", "image_reply_he")   # a poll post adds these
 
 # The names fans use, by Euroleague code.
 CLUB = {"ASV": "ASVEL", "BAR": "Barcelona", "BAS": "Baskonia", "BES": "Besiktas", "DUB": "Dubai",
@@ -228,6 +229,8 @@ def anatomy(D):
         if abs(sum(parts.values()) - pir) > 0.01:
             print(f"  ! {name}: the parts add up to {sum(parts.values()):.2f}, his PIR is {pir:.2f}")
         p = rows[name]
+        if p.get("Average_Score") is None:
+            continue  # priced, but no fantasy average yet (no counted game): nothing to break down
         out[name] = {"name": name, "team": lines[0]["team"], "pos": p["position"], "cr": p["CR"], "games": n,
                      "min": sum(x["min"] for x in lines) / n, "parts": parts, "pir": pir,
                      "fpt": p["Average_Score"], "bonus": p["Average_Score"] - pir}
@@ -583,6 +586,9 @@ def build(posts, b, notes=(), ideas=()):
     `posts`, the `notes`, then the `ideas` not made) and its block in social/POSTS.md.
     A post: {id, format, title, when, html (a function returning the page), what, en, he,
     numbers [lines; "  - " for sub-points], replies [likely comments and the answer]}.
+    A poll post adds poll + poll_he (2-4 options, 25 characters each) and image_reply +
+    image_reply_he: X can't put a poll on an image post, so the image goes in the first
+    reply, with that text, and the link in the second.
     --out DIR writes it all there instead (to compare) and leaves POSTS.md alone;
     --keep-html keeps each page's HTML next to its PNG."""
     args = sys.argv[1:]
@@ -596,6 +602,14 @@ def build(posts, b, notes=(), ideas=()):
     problems += [f"{i}: no such post" for i in only if i not in ids]
     problems += [f"{p['id']}: the {lang.upper()} text is {g.x_length(p[lang])} characters - X allows 280"
                  for p in posts for lang in ("en", "he") if p.get(lang) and g.x_length(p[lang]) > 280]
+    for p in (p for p in posts if "poll" in p):
+        problems += [f"{p['id']}: no {k}" for k in POLL_KEYS if k not in p]
+        problems += [f"{p['id']}: {k} has {len(p.get(k, []))} options - X takes 2-4" for k in ("poll", "poll_he")
+                     if not 2 <= len(p.get(k, [])) <= 4]
+        problems += [f"{p['id']}: the poll option \"{x}\" is {g.x_length(x)} characters - X allows 25"
+                     for k in ("poll", "poll_he") for x in p.get(k, []) if g.x_length(x) > 25]
+        problems += [f"{p['id']}: {k} is {g.x_length(p[k])} characters - X allows 280"
+                     for k in ("image_reply", "image_reply_he") if p.get(k) and g.x_length(p[k]) > 280]
     if problems:
         raise SystemExit("Not built:\n  " + "\n  ".join(problems))
 
@@ -607,12 +621,17 @@ def build(posts, b, notes=(), ideas=()):
         png = render(doc, out / p["id"] / f"{p['id']}.png", keep="--keep-html" in args)
         _write_post(p, b, out, D)
         en, he, mb = g.x_length(p["en"]), g.x_length(p["he"]), png.stat().st_size / 1e6
-        print(f"✓ {p['id']}: EN {en}/280 · HE {he}/280 · {mb:.1f} MB · {png}")
-        missing = [x for x in _decimals(p["en"]) if x not in doc]
+        poll = "poll" in p
+        extra = (f" · image reply EN {g.x_length(p['image_reply'])} · HE {g.x_length(p['image_reply_he'])}"
+                 if poll else "")
+        print(f"✓ {p['id']}: EN {en}/280 · HE {he}/280{extra} · {mb:.1f} MB · {png}")
+        en_all = p["en"] + ("\n" + p["image_reply"] if poll else "")
+        he_all = p["he"] + ("\n" + p["image_reply_he"] if poll else "")
+        missing = [x for x in _decimals(en_all) if x not in doc]
         if missing:
             print(f"  ! in the text, not in the image: {', '.join(missing)} - make sure they agree")
-        if sorted(_decimals(p["en"])) != sorted(_decimals(p["he"])):
-            print(f"  ! EN and HE numbers differ: {_decimals(p['en'])} / {_decimals(p['he'])}")
+        if sorted(_decimals(en_all)) != sorted(_decimals(he_all)):
+            print(f"  ! EN and HE numbers differ: {_decimals(en_all)} / {_decimals(he_all)}")
         if max(en, he) > 275:
             print("  ! over 275 characters - tight; trim if you can")
         if mb >= 5:
@@ -628,18 +647,41 @@ def _write_post(p, b, out, D):
     answers ready for the comments, then the Hebrew version."""
     pid = p["id"]
     md = [f"# {p['title']}", "",
-          f"Round {b.round} · original · {p['format']} · post **{p['when']}**.", "", p["what"], "",
-          f"Attach: `{pid}.png`", "", f"![{pid}]({pid}.png)", "",
-          "## Post", "", *_fence(p["en"]), "", f"{g.x_length(p['en'])} characters.", "",
-          "## Then reply to your own post with (the link goes here)", "", *_fence(_reply(b, pid, "en")), "",
-          "## The numbers behind it", "", f"Data as of {local(D['pulled'])}.", "",
-          *[x if x.startswith("  ") else f"- {x}" for x in p["numbers"]], "",
-          "## When the replies come in", "", *[f"- {x}" for x in p["replies"]], "",
-          "---", "", "## עברית (Hebrew)", "", "### פוסט - אותה תמונה", "", *_fence(p["he"]), "",
-          f"{g.x_length(p['he'])} characters.", "", "### Then reply to your own post with (the link goes here)", "",
-          *_fence(_reply(b, pid, "he")), ""]
+          f"Round {b.round} · original · {p['format']} · post **{p['when']}**.", "", p["what"], ""]
+    if "poll" in p:
+        md += _poll_steps(p, b, "##", f"{pid}.png", "en", _lock(D, b))
+    else:
+        md += [f"Attach: `{pid}.png`", "", f"![{pid}]({pid}.png)", "",
+               "## Post", "", *_fence(p["en"]), "", f"{g.x_length(p['en'])} characters.", "",
+               "## Then reply to your own post with (the link goes here)", "", *_fence(_reply(b, pid, "en")), ""]
+    md += ["## The numbers behind it", "", f"Data as of {local(D['pulled'])}.", "",
+           *[x if x.startswith("  ") else f"- {x}" for x in p["numbers"]], "",
+           "## When the replies come in", "", *[f"- {x}" for x in p["replies"]], "",
+           "---", "", "## עברית (Hebrew)", ""]
+    if "poll" in p:
+        md += _poll_steps(p, b, "###", f"{pid}.png", "he", _lock(D, b))
+    else:
+        md += ["### פוסט - אותה תמונה", "", *_fence(p["he"]), "",
+               f"{g.x_length(p['he'])} characters.", "", "### Then reply to your own post with (the link goes here)", "",
+               *_fence(_reply(b, pid, "he")), ""]
     (out / pid).mkdir(parents=True, exist_ok=True)
     (out / pid / "post.md").write_text("\n".join(md))
+
+
+def _poll_steps(p, b, h, img, lang, lock=None):
+    """A poll post's steps: the poll (no image - X can't have both), the image in the first
+    reply, the link in the second."""
+    he = lang == "he"
+    text, poll, reply = (p["he"], p["poll_he"], p["image_reply_he"]) if he else (p["en"], p["poll"], p["image_reply"])
+    close = f" and set it to close at the lock, {lock}" if lock else ""
+    name = Path(img).stem
+    return [f"{h} {'פוסט - סקר, בלי תמונה' if he else 'Post: a poll, no image'}", "", *_fence(text), "",
+            f"{g.x_length(text)} characters. Poll options - add them in X's composer{close}:", "",
+            *_fence("\n".join(poll)), "",
+            f"{h} {'תגובה ראשונה - התמונה' if he else 'First reply: the image'}", "",
+            *([] if he else [f"Attach: `{img}`", "", f"![{name}]({img})", ""]),
+            *_fence(reply), "", f"{g.x_length(reply)} characters.", "",
+            f"{h} Then a second reply (the link goes here)", "", *_fence(_reply(b, p["id"], lang)), ""]
 
 
 def _lock(D, b):
@@ -685,10 +727,13 @@ def update_plan(posts, b):
         folder = f"{rel}/{p['id']}"
         block += [f"### ✦ {p['title']} - post {p['when']}",
                   f"Folder: [`{folder}/`]({folder}/post.md) (the numbers behind it, answers for the comments "
-                  "and the Hebrew version are in post.md)", "",
-                  f"Attach: `{folder}/{p['id']}.png`", "", f"![{p['id']}]({folder}/{p['id']}.png)", "",
-                  "#### Post", "", *_fence(p["en"]), "",
-                  "#### Then reply to your own post with (the link goes here)", "", *_fence(_reply(b, p["id"], "en")), ""]
+                  "and the Hebrew version are in post.md)", ""]
+        if "poll" in p:
+            block += _poll_steps(p, b, "####", f"{folder}/{p['id']}.png", "en")
+        else:
+            block += [f"Attach: `{folder}/{p['id']}.png`", "", f"![{p['id']}]({folder}/{p['id']}.png)", "",
+                      "#### Post", "", *_fence(p["en"]), "",
+                      "#### Then reply to your own post with (the link goes here)", "", *_fence(_reply(b, p["id"], "en")), ""]
     block = "\n".join([*block, "<!-- /originals -->"])
     mine = next((m for m in g.ORIGINALS_BLOCK.finditer(text) if m.group(1) == rel), None)
     if mine:
