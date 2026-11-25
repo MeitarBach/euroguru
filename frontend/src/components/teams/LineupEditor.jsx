@@ -5,6 +5,7 @@ import { euroleagueCode } from '../../lib/live/teams';
 import { marginText } from '../../lib/live/format';
 import { crChange, coachExpected, coachScore, pct } from '../../lib/optimizer/score';
 import CoachOdds from './CoachOdds';
+import InjuryBadge from '../InjuryBadge';
 import LiveDot from '../live/LiveDot';
 import { GameNote } from '../live/WatchCard';
 
@@ -12,12 +13,6 @@ const ROLE_LABEL = { captain: 'Captain · x2', starter: 'x1', sixth: '6th man ·
 const one = (x) => (x === null || x === undefined ? '–' : x.toFixed(1));
 const NO_KEYS = new Set();
 const iconBtn = 'p-1.5 rounded-md text-gray-500 hover:text-white hover:bg-white/5 disabled:opacity-30 disabled:hover:bg-transparent';
-
-function Injury({ status }) {
-    if (!status) return null;
-    const out = String(status).toUpperCase().startsWith('OUT');
-    return <span className={`ml-1.5 text-[10px] font-semibold ${out ? 'text-red-300' : 'text-amber-300'}`}>{out ? 'OUT' : 'GTD'}</span>;
-}
 
 /**
  * One player and his controls. `subsOnly` (a round is on) keeps the moves and drops the
@@ -39,7 +34,7 @@ function PlayerLine({ row, editable, subsOnly, started, past, live, now, onActio
                 <span className="flex items-center text-sm text-white truncate">
                     {row.role === 'captain' && <Crown size={12} className="mr-1 text-amber-300 shrink-0" />}
                     <span className="truncate">{p?.PlayerName ?? 'Unknown player'}</span>
-                    <Injury status={row.injury} />
+                    {p && <InjuryBadge name={p.PlayerName} status={row.injury ?? p.InjuryStatus} injury={p.Injury} size="xs" className="ml-1.5" />}
                 </span>
                 {/* The details wrap between their parts on a narrow screen rather than being cut off. */}
                 <span className="flex flex-wrap gap-x-2 text-[11px] text-gray-500">

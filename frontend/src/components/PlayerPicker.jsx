@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { anchorFrom, anchoredPosition } from '../anchoredPanel';
 import { UserPlus, Check } from 'lucide-react';
 import SearchInput from './SearchInput';
+import InjuryBadge from './InjuryBadge';
 
 /**
  * Multi-select for choosing which players a chart draws.
@@ -128,6 +129,7 @@ export default function PlayerPicker({ players, selected, onChange, max }) {
                                     <span className={`truncate ${blocked ? 'text-gray-600' : 'text-gray-200'}`}>
                                         {player.playerName}
                                     </span>
+                                    <InjuryBadge name={player.playerName} size="xs" />
                                     <span className="ml-auto pl-2 flex items-center gap-2 shrink-0 tabular-nums">
                                         <span className="text-[10px] text-gray-600">{player.team}</span>
                                         <span className={`text-xs ${player.change > 0 ? 'text-emerald-400'

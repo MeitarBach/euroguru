@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { fetchDashboardData } from '../services/api';
 import { Activity, ChevronDown, ChevronUp, Flame, Target, Banknote, Sparkles, X } from 'lucide-react';
 import { statusOf, statusRank } from '../injuries';
+import InjuryBadge from './InjuryBadge';
 import { useOpenPlayer } from '../hooks/playerDetailContext';
 import usePriceTrend from '../hooks/usePriceTrend';
 import PriceTrend from './charts/PriceTrend';
@@ -41,7 +42,10 @@ const PlayerCard = ({ player, rank, type, metric = 'PIR', trend, onOpen }) => (
             {rank}
         </div>
         <div className="flex-1 min-w-0">
-            <div className="font-medium text-white truncate">{player.PlayerName}</div>
+            <div className="font-medium text-white flex items-center gap-1.5 min-w-0">
+                <span className="truncate">{player.PlayerName}</span>
+                <InjuryBadge name={player.PlayerName} status={player.InjuryStatus} injury={player.Injury} size="xs" />
+            </div>
             <div className="flex items-center gap-2 text-xs text-gray-400">
                 <span>{player.Team}</span>
                 <span>•</span>
@@ -154,11 +158,11 @@ const INJURY_PREVIEW = 9;
 const InjuryRow = ({ inj, onOpen }) => {
     const status = statusOf(inj.InjuryStatus);
     return (
-        // The injury feed is a separate source (Rotowire) and names a player as
-        // `Player`, which does not always match a PlayerName in the stats. Clicking
-        // still works; the detail view says so plainly when the name resolves to nothing.
+        // The injury feed is a separate source (Rotowire) and names a player in full
+        // (`Player`); the API adds the app's own `PlayerName` when it matches one, which
+        // is what opens him. Unmatched, the detail view says so plainly.
         <button
-            onClick={() => onOpen?.(inj.Player)}
+            onClick={() => onOpen?.(inj.PlayerName || inj.Player)}
             title={inj.InjuryStatus}
             className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-left text-sm
                        hover:bg-[#ffffff08] transition-colors"

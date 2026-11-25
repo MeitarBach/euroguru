@@ -115,6 +115,10 @@ export const fetchDashboardData = (season) =>
         { widgets: {}, injuries: [] }
     );
 
+/** The current injury report: {players: {PlayerName: {InjuryStatus, Injury}}, injuries}. */
+export const fetchInjuries = () =>
+    cached('injuries', () => client.get(`${API_URL}/injuries`), { players: {}, injuries: [] });
+
 export const fetchPlayerDetail = (name, season) =>
     cached(
         `player:${season}:${name}`,

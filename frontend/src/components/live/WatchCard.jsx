@@ -1,4 +1,5 @@
 import React from 'react';
+import InjuryBadge from '../InjuryBadge';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X } from 'lucide-react';
 import AnimatedNumber from './AnimatedNumber';
@@ -162,9 +163,6 @@ export default function WatchCard({
     // the fantasy game does not price is listed but cannot be added.
     const unpriced = row.priced === false;
     const selectable = Boolean(onSelect) && !unpriced;
-    const injury = player.InjuryStatus
-        ? (String(player.InjuryStatus).toUpperCase().startsWith('OUT') ? 'OUT' : 'GTD')
-        : null;
 
     return (
         <MotionDiv
@@ -197,7 +195,7 @@ export default function WatchCard({
                         ) : (
                             <span className="text-sm font-semibold text-white truncate">{player.PlayerName}</span>
                         )}
-                        {injury && <span className="text-[9px] px-1 rounded bg-red-500/15 text-red-300 shrink-0">{injury}</span>}
+                        {!unpriced && <InjuryBadge name={player.PlayerName} status={player.InjuryStatus} injury={player.Injury} size="xs" />}
                         {alsoIn.map(g => (
                             <span key={g.id} title={`Also in ${g.name}`} className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: g.colorHex }} />
                         ))}

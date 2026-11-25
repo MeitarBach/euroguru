@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { fetchFilters, fetchStats, fetchHeadshots } from '../services/api';
 import { Filter, Download, List, TrendingUp, BarChart2 } from 'lucide-react';
 import useDebouncedValue from '../hooks/useDebouncedValue';
-import { statusOf } from '../injuries';
+import InjuryBadge from './InjuryBadge';
 import { useOpenPlayer } from '../hooks/playerDetailContext';
 import InfoTip from './InfoTip';
 import SearchInput from './SearchInput';
@@ -438,17 +438,12 @@ export default function StatsView() {
                                                     return (
                                                         <td key={col.id} className={`px-2 md:px-4 py-3 font-medium text-white whitespace-nowrap ${STICKY_CELL}`}>
                                                             {narrow ? shortName(player.PlayerName) : player.PlayerName}
-                                                            {player.InjuryStatus && (
-                                                                // Abbreviated and tone-matched via the shared helper: the raw
-                                                                // feed value for a game-time decision is the full phrase, which
-                                                                // would widen this column well past the name it annotates.
-                                                                <span
-                                                                    title={player.InjuryStatus}
-                                                                    className={`ml-2 text-[10px] px-1.5 py-0.5 rounded border ${statusOf(player.InjuryStatus).chip}`}
-                                                                >
-                                                                    {statusOf(player.InjuryStatus).short}
-                                                                </span>
-                                                            )}
+                                                            <InjuryBadge
+                                                                name={player.PlayerName}
+                                                                status={player.InjuryStatus}
+                                                                injury={player.Injury}
+                                                                className="ml-2"
+                                                            />
                                                         </td>
                                                     );
                                                 }

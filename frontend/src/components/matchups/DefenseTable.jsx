@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { POSITIONS, POSITION_NAMES, POSITION_COLORS, heatStyle } from './heat';
 import { GateFade } from '../Gate';
+import InjuryBadge from '../InjuryBadge';
 import { PREVIEW_ROWS, BLURRED_ROWS, BLURRED_ROW } from '../../lib/gate';
 
 const METRICS = [
@@ -159,7 +160,8 @@ function TeamBreakdown({ team, teams, openPlayer }) {
                     {team.top.map(g => (
                         <li key={`${g.player}-${g.round}`} className="flex items-center justify-between gap-2 text-sm">
                             <button className="text-left text-gray-200 hover:text-purple-300 truncate" onClick={() => openPlayer(g.player)}>
-                                {g.player} <span className="text-xs text-gray-500">{g.team} · R{g.round}</span>
+                                {g.player} <InjuryBadge name={g.player} size="xs" className="align-middle" />{' '}
+                                <span className="text-xs text-gray-500">{g.team} · R{g.round}</span>
                             </button>
                             <span className="font-mono text-gray-100">{g.fpt.toFixed(1)}</span>
                         </li>

@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import InjuryBadge from '../InjuryBadge';
 import { ArrowLeft } from 'lucide-react';
 import AddToGroupsMenu from './AddToGroupsMenu';
 import LiveDot from './LiveDot';
@@ -75,6 +76,7 @@ function PlayerCell({ row, alsoIn }) {
                 ? <span title="On the court"><LiveDot color="green" /></span>
                 : <span title="Off the court" className="h-2 w-2 rounded-full bg-gray-700 shrink-0" />)}
             <span className={`truncate ${line?.starter ? 'text-white font-medium' : 'text-gray-200'}`}>{player.PlayerName}</span>
+            {row.priced !== false && <InjuryBadge name={player.PlayerName} status={player.InjuryStatus} injury={player.Injury} size="xs" />}
             {alsoIn.map(g => (
                 <span key={g.id} title={`In ${g.name}`} className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: g.colorHex }} />
             ))}
@@ -335,9 +337,10 @@ export default function GameSection({
                                     key={row.key}
                                     type="button"
                                     onClick={(e) => pick(row, e)}
-                                    className="px-1.5 py-0.5 rounded text-gray-400 hover:text-white hover:bg-white/5"
+                                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-gray-400 hover:text-white hover:bg-white/5"
                                 >
                                     {row.player.PlayerName}
+                                    <InjuryBadge name={row.player.PlayerName} status={row.player.InjuryStatus} injury={row.player.Injury} size="xs" />
                                 </button>
                             ))}
                         </div>

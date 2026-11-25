@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import InjuryBadge from '../InjuryBadge';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, Crown, X, Lock } from 'lucide-react';
 import AnimatedNumber from './AnimatedNumber';
@@ -240,14 +241,27 @@ function StartedMark({ className = '', style }) {
     );
 }
 
-/** A price and, when the injury report has him, OUT or GTD - for building a team. */
+/** A player's price - for building a team. */
 function PriceLine({ row, style, className = '' }) {
-    const out = row.injury && String(row.injury).toUpperCase().startsWith('OUT');
     return (
         <div className={`text-gray-500 whitespace-nowrap ${className}`} style={style}>
             {typeof row.cr === 'number' ? `${row.cr.toFixed(1)} CR` : ''}
-            {row.injury && <span className={`ml-1 font-bold ${out ? 'text-red-300' : 'text-amber-300'}`}>{out ? 'OUT' : 'GTD'}</span>}
         </div>
+    );
+}
+
+/** The injured badge on a player's photo, in every mode: his row's status (My Teams'
+    expected rows carry `injury`, the Live tab's the roster's InjuryStatus), else the report. */
+function InjuryCorner({ row, className }) {
+    return (
+        <InjuryBadge
+            name={row.player.PlayerName}
+            status={row.injury ?? row.player.InjuryStatus}
+            injury={row.player.Injury}
+            size="xs"
+            solid
+            className={`absolute z-10 shadow-lg ${className}`}
+        />
     );
 }
 
@@ -372,6 +386,7 @@ function Starter({ row, photo, left, top, width, narrow, tiny, now, lastEvent, o
                 <div className="relative">
                     <Bust url={photoUrl(photo, 240)} name={row.player.PlayerName} captain={row.captain} size={size} />
                     <Bubble event={lastEvent} factor={row.factor} now={now} />
+                    <InjuryCorner row={row} className={narrow ? 'left-[4%] top-[3%]' : 'left-[10%] top-[3%]'} />
                 </div>
                 <div
                     className={`relative -mt-1 ${narrow ? 'px-1' : 'px-1.5'} py-1 rounded-xl bg-[#0a0812]/90 border shadow-[0_8px_24px_rgba(0,0,0,0.45)] transition-colors
@@ -619,6 +634,7 @@ export default function TeamCourt({
                             <div className={TILE_PHOTO}>
                                 <Bust url={photoUrl(photos[row.key], 140)} name={row.player.PlayerName} size="128px" />
                                 <Bubble event={lastEvent?.get(row.key)} factor={row.factor} now={now} />
+                                <InjuryCorner row={row} className="left-1.5 bottom-1" />
                             </div>
                             <TileName corner={!sixUp} pos={row.player.position || '?'} name={surname(row.player.PlayerName)} />
                             <div className="w-full flex items-center justify-center gap-1 text-[11px] text-gray-400 whitespace-nowrap">

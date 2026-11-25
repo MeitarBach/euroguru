@@ -3,6 +3,7 @@ import { POSITIONS, POSITION_COLORS, pctVs } from './heat';
 import { GateFade, LockedControl } from '../Gate';
 import { PREVIEW_ROWS, BLURRED_ROWS, BLURRED_ROW } from '../../lib/gate';
 import { shortName } from '../../columns';
+import InjuryBadge from '../InjuryBadge';
 import { useIsNarrow } from '../../hooks/useMediaQuery';
 
 const LIMIT = 20;
@@ -81,7 +82,7 @@ export default function MatchupBoost({ picks, locked, openPlayer }) {
                                         <td className="px-4 py-2.5 whitespace-nowrap">
                                             <span className="font-medium text-white">{narrow ? shortName(x.player) : x.player}</span>
                                             <span className="ml-1.5 text-xs text-gray-600">{x.team}</span>
-                                            {x.injury && <span className="ml-1.5 text-xs text-red-400" title={x.injury}>⚠</span>}
+                                            <InjuryBadge name={x.player} status={x.injury || undefined} size="xs" className="ml-1.5 align-middle" />
                                         </td>
                                         <td className="px-3 py-2.5">
                                             <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded border border-white/10" style={{ color: POSITION_COLORS[x.pos] }}>{x.pos}</span>
